@@ -1,5 +1,7 @@
 import { eventSource, event_types } from '../../../../script.js';
 import { getContext } from '../../../extensions.js';
+import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.js';
+import { SlashCommand } from '../../../slash-commands/SlashCommand.js';
 
 // ─── Playback & App State ──────────────────────────────────────────────────────
 var state = {
@@ -1863,7 +1865,10 @@ function ensureQRButton() {
   }
 
   var doc = getDoc();
-  var btnContainer = doc.querySelector('#qr--bar .qr--buttons') || doc.getElementById('qr--bar');
+  var btnContainer = doc.querySelector('#qr--bar .qr--buttons') || 
+                     doc.querySelector('#qr-bar .qr--buttons') || 
+                     doc.getElementById('qr--bar') || 
+                     doc.getElementById('qr-bar');
   if (!btnContainer) return;
 
   var btn = doc.getElementById('fire-qr-btn');
@@ -1876,7 +1881,7 @@ function ensureQRButton() {
 
   btn = doc.createElement('div');
   btn.id = 'fire-qr-btn';
-  btn.className = 'qr--button menu_button interactable fire-qr-btn';
+  btn.className = 'qr--button qr-button menu_button interactable fire-qr-btn';
   btn.tabIndex = 0;
   btn.role = 'button';
   btn.title = '音乐';
@@ -1899,29 +1904,43 @@ function ensureQRButton() {
 function ensureWandButton() {
   try {
     var doc = getDoc();
-    var menu = doc.getElementById('extensionsMenu');
-    if (!menu) return;
-
-    var existing = doc.getElementById('fire_wand_container');
+    
+    // Check if the button is already in the DOM
+    var existing = doc.getElementById('fire_wand_entry');
     if (existing) {
-      if (!menu.contains(existing)) {
-        menu.appendChild(existing);
+      // Ensure it is still attached to a valid container
+      var container = doc.getElementById('FIRE_wand_container') || 
+                      doc.getElementById('fire_wand_container') || 
+                      doc.getElementById('extensionsMenu') || 
+                      doc.querySelector('#extensionsMenu.options-content');
+      if (container && !container.contains(existing)) {
+        container.appendChild(existing);
       }
       return;
     }
 
-    var container = doc.createElement('div');
-    container.id = 'fire_wand_container';
-    container.className = 'extension_container';
-    container.innerHTML = `
-      <div id="fire_wand_entry" class="list-group-item flex-container flexGap5">
-        <div class="fa-solid fa-music extensionsMenuExtensionButton"></div>
-        音乐
-      </div>
+    // Determine the best target container
+    var target = doc.getElementById('FIRE_wand_container') || 
+                 doc.getElementById('fire_wand_container');
+                 
+    if (!target) {
+      target = doc.getElementById('extensionsMenu') || 
+               doc.querySelector('#extensionsMenu.options-content');
+    }
+    
+    if (!target) return; // Wait for DOM to load
+
+    var btn = doc.createElement('div');
+    btn.id = 'fire_wand_entry';
+    // Combine classes from old and new SillyTavern versions to support both
+    btn.className = 'list_item list-group-item interactable flex-container flexGap5';
+    btn.title = '音乐';
+    btn.innerHTML = `
+      <i class="fa-solid fa-music extensionsMenuExtensionButton"></i>
+      <span class="list_item_text">音乐</span>
     `;
-    menu.appendChild(container);
-    var wandBtn = doc.getElementById('fire_wand_entry');
-    if (wandBtn) wandBtn.addEventListener('click', togglePanel);
+    target.appendChild(btn);
+    btn.addEventListener('click', togglePanel);
   } catch (e) {
     console.warn("[FIRE] Failed to inject Magic Wand button:", e);
   }
@@ -2008,4 +2027,34 @@ export function init() {
   // Initialize self-healing injection observer and interval polling
   initUIInjection();
   applyDisplayMode();
+
+  // ─── Escape Hatch / Backup Entry Points ─────────────────────────────────────
+  // 1. Slash Command: /fire (type /fire in chat bar to open)
+  try {
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+      name: 'fire',
+      callback: () => {
+        togglePanel();
+        return '';
+      },
+      helpString: '打开/关闭音乐播放器界面 (Toggle FIRE Music Player)',
+    }));
+  } catch (e) {
+    console.warn("[FIRE] Failed to register slash command /fire:", e);
+  }
+
+  // 2. Keyboard Shortcut: Alt + M (press Alt + M globally to open)
+  try {
+    window.addEventListener('keydown', function (e) {
+      if (e.altKey && (e.key === 'm' || e.key === 'M' || e.keyCode === 77)) {
+        e.preventDefault();
+        togglePanel();
+      }
+    });
+  } catch (e) {}
+
+  // 3. Console Escape Hatch: type fireTogglePlayer() in F12 console
+  try {
+    window.fireTogglePlayer = togglePanel;
+  } catch (e) {}
 }

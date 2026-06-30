@@ -2,6 +2,13 @@ import { eventSource, event_types } from '../../../../script.js';
 import { getContext } from '../../../extensions.js';
 import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.js';
 import { SlashCommand } from '../../../slash-commands/SlashCommand.js';
+import { 
+  initLyricsWidget, 
+  ensureDesktopLyrics, 
+  applyDesktopLyricsSettings, 
+  updateDesktopLyrics, 
+  clampDesktopLyricsPosition 
+} from './lyrics-widget.js';
 
 // ─── Playback & App State ──────────────────────────────────────────────────────
 var state = {
@@ -16,7 +23,17 @@ var state = {
   activeQueue: [],
   settings: {
     displayMode: 'wand-modal',
-    audioQuality: '999'
+    audioQuality: '999',
+    desktopLyricsEnabled: false,
+    desktopLyricsLocked: false,
+    desktopLyricsTextColor: '#ffffff',
+    desktopLyricsBgColor: '#080d14',
+    desktopLyricsBgOpacity: 60,
+    desktopLyricsFontSize: 16,
+    desktopLyricsToggleMethod: 'none',
+    desktopLyricsLongPressTime: 800,
+    desktopLyricsLeft: '',
+    desktopLyricsTop: ''
   }
 };
 
@@ -224,6 +241,7 @@ async function playSong(song) {
   lyricsList = [];
   lastActiveLineIdx = -1;
   renderLyrics();
+  updateDesktopLyrics(-1, lyricsList);
 
   showToast("正在加载: " + song.name);
 
@@ -295,14 +313,17 @@ async function fetchAndParseLyrics(songId, source) {
       
       lyricsList = original;
       renderLyrics();
+      updateDesktopLyrics(-1, lyricsList);
     } else {
       lyricsList = [];
       renderLyrics();
+      updateDesktopLyrics(-1, lyricsList);
     }
   } catch (e) {
     console.warn("[FIRE] Failed to load lyrics:", e);
     lyricsList = [];
     renderLyrics();
+    updateDesktopLyrics(-1, lyricsList);
   }
 }
 
@@ -572,6 +593,61 @@ function createUI() {
           </label>
         </div>
       </div>
+      
+      <!-- Section 3: Desktop Lyrics -->
+      <div class="fire-settings-section" style="margin-top: 8px; border-top: 1px solid var(--fire-border); padding-top: 8px;">
+        <div class="fire-settings-section-header" id="fire-settings-header-lyrics">
+          <span>桌面歌词</span>
+          <i class="fa-solid fa-chevron-right fire-settings-chevron"></i>
+        </div>
+        <div class="fire-settings-section-content" id="fire-settings-content-lyrics" style="display: none;">
+          <label class="fire-settings-item" style="justify-content: space-between;">
+            <span>开启桌面歌词</span>
+            <input type="checkbox" id="fire-setting-lyrics-enable">
+          </label>
+          <label class="fire-settings-item" style="justify-content: space-between;">
+            <span>锁定歌词位置</span>
+            <input type="checkbox" id="fire-setting-lyrics-lock">
+          </label>
+          <div class="fire-settings-sub-item" style="flex-direction: column; align-items: stretch; gap: 4px;">
+            <span style="font-size: 11px;">锁定切换触发方式</span>
+            <select id="fire-setting-lyrics-togglemethod" class="fire-select" style="padding: 4px 8px; font-size: 12px; height: 28px;">
+              <option value="none">仅设置菜单</option>
+              <option value="rightclick_longpress">右键 (PC) / 长按 (手机)</option>
+              <option value="rightclick_doubletap">右键 (PC) / 双击 (手机)</option>
+            </select>
+          </div>
+          <div class="fire-settings-sub-item-slider" id="fire-setting-lyrics-longpress-container" style="display: none; margin-top: 6px;">
+            <div style="display: flex; justify-content: space-between; font-size: 11px;">
+              <span>手机长按时间</span>
+              <span id="fire-setting-lyrics-longpress-val">800ms</span>
+            </div>
+            <input type="range" id="fire-setting-lyrics-longpress" min="300" max="2000" step="50">
+          </div>
+          <div class="fire-settings-sub-item">
+            <span>歌词颜色</span>
+            <input type="color" id="fire-setting-lyrics-textcolor">
+          </div>
+          <div class="fire-settings-sub-item">
+            <span>背景颜色</span>
+            <input type="color" id="fire-setting-lyrics-bgcolor">
+          </div>
+          <div class="fire-settings-sub-item-slider">
+            <div style="display: flex; justify-content: space-between; font-size: 11px;">
+              <span>背景不透明度</span>
+              <span id="fire-setting-lyrics-opacity-val">60%</span>
+            </div>
+            <input type="range" id="fire-setting-lyrics-bgopacity" min="0" max="100">
+          </div>
+          <div class="fire-settings-sub-item-slider" style="margin-top: 8px;">
+            <div style="display: flex; justify-content: space-between; font-size: 11px;">
+              <span>歌词字号大小</span>
+              <span id="fire-setting-lyrics-fontsize-val">16px</span>
+            </div>
+            <input type="range" id="fire-setting-lyrics-fontsize" min="12" max="32">
+          </div>
+        </div>
+      </div>
     </div>
 
     <div id="fire-panel-body">
@@ -733,6 +809,48 @@ function createUI() {
       radio.checked = true;
     }
   });
+
+  // Set default desktop lyrics selection
+  var chkEnable = doc.getElementById('fire-setting-lyrics-enable');
+  if (chkEnable) chkEnable.checked = !!state.settings.desktopLyricsEnabled;
+
+  var chkLock = doc.getElementById('fire-setting-lyrics-lock');
+  if (chkLock) chkLock.checked = !!state.settings.desktopLyricsLocked;
+
+  var inputTextColor = doc.getElementById('fire-setting-lyrics-textcolor');
+  if (inputTextColor) inputTextColor.value = state.settings.desktopLyricsTextColor || '#ffffff';
+
+  var inputBgColor = doc.getElementById('fire-setting-lyrics-bgcolor');
+  if (inputBgColor) inputBgColor.value = state.settings.desktopLyricsBgColor || '#080d14';
+
+  var inputBgOpacity = doc.getElementById('fire-setting-lyrics-bgopacity');
+  var valOpacity = doc.getElementById('fire-setting-lyrics-opacity-val');
+  var initialOpacity = state.settings.desktopLyricsBgOpacity !== undefined ? state.settings.desktopLyricsBgOpacity : 60;
+  if (inputBgOpacity) inputBgOpacity.value = initialOpacity;
+  if (valOpacity) valOpacity.textContent = initialOpacity + '%';
+
+  var inputFontSize = doc.getElementById('fire-setting-lyrics-fontsize');
+  var valFontSize = doc.getElementById('fire-setting-lyrics-fontsize-val');
+  var initialFontSize = state.settings.desktopLyricsFontSize !== undefined ? state.settings.desktopLyricsFontSize : 16;
+  if (inputFontSize) inputFontSize.value = initialFontSize;
+  if (valFontSize) valFontSize.textContent = initialFontSize + 'px';
+
+  var inputToggleMethod = doc.getElementById('fire-setting-lyrics-togglemethod');
+  if (inputToggleMethod) inputToggleMethod.value = state.settings.desktopLyricsToggleMethod || 'none';
+
+  var inputLongPress = doc.getElementById('fire-setting-lyrics-longpress');
+  var valLongPress = doc.getElementById('fire-setting-lyrics-longpress-val');
+  var initialLongPress = state.settings.desktopLyricsLongPressTime || 800;
+  if (inputLongPress) inputLongPress.value = initialLongPress;
+  if (valLongPress) valLongPress.textContent = initialLongPress + 'ms';
+
+  var longPressContainer = doc.getElementById('fire-setting-lyrics-longpress-container');
+  if (longPressContainer) {
+    longPressContainer.style.display = (state.settings.desktopLyricsToggleMethod === 'rightclick_longpress') ? 'block' : 'none';
+  }
+
+  // Ensure widget is generated and synchronized
+  ensureDesktopLyrics(lyricsList, lastActiveLineIdx);
 }
 
 function bindUIEvents() {
@@ -782,6 +900,7 @@ function bindUIEvents() {
     };
     setupCollapsibleSetting('fire-settings-header-display', 'fire-settings-content-display');
     setupCollapsibleSetting('fire-settings-header-quality', 'fire-settings-content-quality');
+    setupCollapsibleSetting('fire-settings-header-lyrics', 'fire-settings-content-lyrics');
   }
 
   // Display Mode Radios
@@ -803,6 +922,98 @@ function bindUIEvents() {
       saveState();
     });
   });
+
+  // Desktop Lyrics Settings Binding
+  // Enable Switch
+  var chkEnable = doc.getElementById('fire-setting-lyrics-enable');
+  if (chkEnable) {
+    chkEnable.addEventListener('change', function () {
+      state.settings.desktopLyricsEnabled = !!this.checked;
+      saveState();
+      ensureDesktopLyrics(lyricsList, lastActiveLineIdx);
+    });
+  }
+
+  // Lock Switch
+  var chkLock = doc.getElementById('fire-setting-lyrics-lock');
+  if (chkLock) {
+    chkLock.addEventListener('change', function () {
+      state.settings.desktopLyricsLocked = !!this.checked;
+      saveState();
+      applyDesktopLyricsSettings();
+    });
+  }
+
+  // Toggle Trigger Method
+  var inputToggleMethod = doc.getElementById('fire-setting-lyrics-togglemethod');
+  var longPressContainer = doc.getElementById('fire-setting-lyrics-longpress-container');
+  if (inputToggleMethod) {
+    inputToggleMethod.addEventListener('change', function () {
+      state.settings.desktopLyricsToggleMethod = this.value;
+      if (longPressContainer) {
+        longPressContainer.style.display = (this.value === 'rightclick_longpress') ? 'block' : 'none';
+      }
+      saveState();
+    });
+  }
+
+  // Long Press Duration Slider
+  var inputLongPress = doc.getElementById('fire-setting-lyrics-longpress');
+  var valLongPress = doc.getElementById('fire-setting-lyrics-longpress-val');
+  if (inputLongPress) {
+    inputLongPress.addEventListener('input', function () {
+      var val = parseInt(this.value, 10);
+      state.settings.desktopLyricsLongPressTime = val;
+      if (valLongPress) valLongPress.textContent = val + 'ms';
+      saveState();
+    });
+  }
+
+  // Text Color Picker
+  var inputTextColor = doc.getElementById('fire-setting-lyrics-textcolor');
+  if (inputTextColor) {
+    inputTextColor.addEventListener('input', function () {
+      state.settings.desktopLyricsTextColor = this.value;
+      saveState();
+      applyDesktopLyricsSettings();
+    });
+  }
+
+  // Bg Color Picker
+  var inputBgColor = doc.getElementById('fire-setting-lyrics-bgcolor');
+  if (inputBgColor) {
+    inputBgColor.addEventListener('input', function () {
+      state.settings.desktopLyricsBgColor = this.value;
+      saveState();
+      applyDesktopLyricsSettings();
+    });
+  }
+
+  // Bg Opacity Slider
+  var inputBgOpacity = doc.getElementById('fire-setting-lyrics-bgopacity');
+  var valOpacity = doc.getElementById('fire-setting-lyrics-opacity-val');
+  if (inputBgOpacity) {
+    inputBgOpacity.addEventListener('input', function () {
+      var val = parseInt(this.value, 10);
+      state.settings.desktopLyricsBgOpacity = val;
+      if (valOpacity) valOpacity.textContent = val + '%';
+      saveState();
+      applyDesktopLyricsSettings();
+    });
+  }
+
+  // Font Size Slider
+  var inputFontSize = doc.getElementById('fire-setting-lyrics-fontsize');
+  var valFontSize = doc.getElementById('fire-setting-lyrics-fontsize-val');
+  if (inputFontSize) {
+    inputFontSize.addEventListener('input', function () {
+      var val = parseInt(this.value, 10);
+      state.settings.desktopLyricsFontSize = val;
+      if (valFontSize) valFontSize.textContent = val + 'px';
+      saveState();
+      applyDesktopLyricsSettings();
+    });
+  }
 
   // Play / Pause Button
   var playBtn = doc.getElementById('fire-btn-play');
@@ -1308,6 +1519,7 @@ function updateLyricsHighlight() {
       }
     }
     lastActiveLineIdx = activeIdx;
+    updateDesktopLyrics(activeIdx, lyricsList);
   }
 }
 
@@ -1989,6 +2201,7 @@ function initUIInjection() {
 // ─── Extension Initializer ────────────────────────────────────────────────────
 export function init() {
   loadState();
+  initLyricsWidget(state, getDoc, saveState);
   createUI();
 
   panelOpen = false;
@@ -2004,6 +2217,7 @@ export function init() {
       p.visualViewport.addEventListener('scroll', syncViewportHeight, { passive: true });
     }
     p.addEventListener('resize', syncViewportHeight, { passive: true });
+    p.addEventListener('resize', clampDesktopLyricsPosition, { passive: true });
   } catch (e) {}
 
   // Responsive layout class guard (suppress animation on breakpoint switch)
@@ -2021,6 +2235,7 @@ export function init() {
         }
       }
       updateTabUI();
+      clampDesktopLyricsPosition();
     }, { passive: true });
   } catch (e) {}
 

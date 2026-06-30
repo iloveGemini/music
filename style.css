@@ -1106,3 +1106,144 @@
     display: flex;
     align-items: center;
 }
+
+/* ─── Desktop Lyrics & Settings Sub-items ─── */
+.fire-settings-sub-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 0;
+    font-size: 13px;
+    color: var(--fire-text);
+}
+.fire-settings-sub-item-slider {
+    padding: 6px 0;
+    color: var(--fire-text);
+}
+.fire-settings-sub-item-slider input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    height: 4px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.2);
+    outline: none;
+    cursor: pointer;
+}
+.fire-settings-sub-item-slider input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--fire-accent);
+}
+
+#fire-desktop-lyrics {
+    position: fixed;
+    z-index: 99999 !important;
+    padding: 14px 20px;
+    border-radius: 12px;
+    border: 1px solid var(--fire-border);
+    box-shadow: 0 8px 32px var(--fire-shadow, rgba(0, 0, 0, 0.4));
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    text-align: center;
+    min-width: 280px;
+    max-width: 600px;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    transition: background-color 0.2s, box-shadow 0.2s, border-color 0.2s;
+    user-select: none;
+}
+
+#fire-desktop-lyrics.unlocked {
+    cursor: move;
+}
+
+#fire-desktop-lyrics.unlocked:hover {
+    border-color: var(--fire-accent);
+    box-shadow: 0 8px 32px rgba(255, 107, 107, 0.2), 0 0 0 1px var(--fire-accent);
+}
+
+#fire-desktop-lyrics.locked {
+    pointer-events: none !important;
+}
+
+/* Toolbar overlay for unlocking/locking on the widget itself */
+.fire-desktop-lyrics-toolbar {
+    position: absolute;
+    top: -24px;
+    left: 0;
+    right: 0;
+    height: 24px;
+    background: rgba(0, 0, 0, 0.75);
+    border: 1px solid var(--fire-border);
+    border-bottom: none;
+    border-radius: 6px 6px 0 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 10px;
+    box-sizing: border-box;
+    font-size: 11px;
+    color: #eee;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+    z-index: 10;
+}
+
+#fire-desktop-lyrics.unlocked:hover .fire-desktop-lyrics-toolbar {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.fire-desktop-lyrics-toolbar .drag-title {
+    font-weight: 500;
+    opacity: 0.8;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.fire-desktop-lyrics-toolbar .action-btn {
+    cursor: pointer;
+    opacity: 0.7;
+    transition: opacity 0.2s, color 0.2s;
+    padding: 2px;
+}
+
+.fire-desktop-lyrics-toolbar .action-btn:hover {
+    opacity: 1;
+    color: var(--fire-accent);
+}
+
+/* Content & Lyric line text sizes */
+.fire-desktop-lyrics-content {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.fire-desktop-lyric-line {
+    word-break: break-word;
+    white-space: normal;
+    transition: color 0.2s ease;
+}
+
+.fire-desktop-lyric-line.current {
+    font-size: 16px;
+    font-weight: bold;
+    line-height: 1.4;
+}
+
+.fire-desktop-lyric-line.translation {
+    font-size: 12px;
+    opacity: 0.85;
+    line-height: 1.3;
+}
+

@@ -196,6 +196,13 @@ export function applyDesktopLyricsSettings() {
   // Apply colors & opacity
   el.style.color = state.settings.desktopLyricsTextColor || '#ffffff';
   
+  // Apply z-index layer
+  var zIndexVal = parseInt(state.settings.desktopLyricsZIndex, 10);
+  if (isNaN(zIndexVal)) {
+    zIndexVal = 99999; // Default fallback
+  }
+  el.style.setProperty('z-index', zIndexVal.toString(), 'important');
+  
   // Apply font size
   var curLine = el.querySelector('.fire-desktop-lyric-line.current');
   var transLine = el.querySelector('.fire-desktop-lyric-line.translation');
@@ -238,10 +245,10 @@ export function applyDesktopLyricsSettings() {
       el.style.top = '20px';
       el.style.bottom = 'auto';
     } else {
-      // Default desktop position: bottom center
+      // Default desktop position: top center
       el.style.left = 'calc(50% - 150px)';
-      el.style.top = 'auto';
-      el.style.bottom = '100px';
+      el.style.top = '20px';
+      el.style.bottom = 'auto';
       el.style.right = 'auto';
     }
   }
@@ -320,7 +327,7 @@ function bindDesktopLyricsDrag(el) {
     document.addEventListener('touchmove', onTouchMove, { passive: false });
     document.addEventListener('touchend', onTouchEnd);
     
-    e.preventDefault();
+    if (e.cancelable) e.preventDefault();
   }, { passive: false });
   
   function onTouchMove(e) {
@@ -343,7 +350,7 @@ function bindDesktopLyricsDrag(el) {
     el.style.bottom = 'auto';
     el.style.right = 'auto';
     
-    e.preventDefault();
+    if (e.cancelable) e.preventDefault();
   }
   
   function onTouchEnd() {

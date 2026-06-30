@@ -32,6 +32,7 @@ var state = {
     desktopLyricsFontSize: 16,
     desktopLyricsToggleMethod: 'none',
     desktopLyricsLongPressTime: 800,
+    desktopLyricsZIndex: 99999,
     desktopLyricsLeft: '',
     desktopLyricsTop: ''
   }
@@ -617,6 +618,10 @@ function createUI() {
               <option value="rightclick_doubletap">右键 (PC) / 双击 (手机)</option>
             </select>
           </div>
+          <div class="fire-settings-sub-item" style="flex-direction: column; align-items: stretch; gap: 4px; margin-top: 4px;">
+            <span style="font-size: 11px;">歌词层级关系 (z-index)</span>
+            <input type="number" id="fire-setting-lyrics-zindex" class="fire-input" style="padding: 4px 8px; font-size: 12px; height: 28px;" placeholder="默认 99999">
+          </div>
           <div class="fire-settings-sub-item-slider" id="fire-setting-lyrics-longpress-container" style="display: none; margin-top: 6px;">
             <div style="display: flex; justify-content: space-between; font-size: 11px;">
               <span>手机长按时间</span>
@@ -645,6 +650,9 @@ function createUI() {
               <span id="fire-setting-lyrics-fontsize-val">16px</span>
             </div>
             <input type="range" id="fire-setting-lyrics-fontsize" min="12" max="32">
+          </div>
+          <div class="fire-settings-sub-item" style="justify-content: flex-end; margin-top: 8px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 8px;">
+            <button id="fire-setting-lyrics-resetpos" class="fire-btn fire-btn-normal" style="padding: 4px 10px; font-size: 11px; height: 26px;">重置歌词位置 (顶部居中)</button>
           </div>
         </div>
       </div>
@@ -849,6 +857,9 @@ function createUI() {
     longPressContainer.style.display = (state.settings.desktopLyricsToggleMethod === 'rightclick_longpress') ? 'block' : 'none';
   }
 
+  var inputZIndex = doc.getElementById('fire-setting-lyrics-zindex');
+  if (inputZIndex) inputZIndex.value = state.settings.desktopLyricsZIndex !== undefined ? state.settings.desktopLyricsZIndex : 99999;
+
   // Ensure widget is generated and synchronized
   ensureDesktopLyrics(lyricsList, lastActiveLineIdx);
 }
@@ -969,6 +980,20 @@ function bindUIEvents() {
     });
   }
 
+  // Layer (z-index) Selection
+  var inputZIndex = doc.getElementById('fire-setting-lyrics-zindex');
+  if (inputZIndex) {
+    inputZIndex.addEventListener('input', function () {
+      var val = parseInt(this.value, 10);
+      if (isNaN(val)) {
+        val = 99999;
+      }
+      state.settings.desktopLyricsZIndex = val;
+      saveState();
+      applyDesktopLyricsSettings();
+    });
+  }
+
   // Text Color Picker
   var inputTextColor = doc.getElementById('fire-setting-lyrics-textcolor');
   if (inputTextColor) {
@@ -1012,6 +1037,19 @@ function bindUIEvents() {
       if (valFontSize) valFontSize.textContent = val + 'px';
       saveState();
       applyDesktopLyricsSettings();
+    });
+  }
+
+  // Reset Position Button
+  var btnResetPos = doc.getElementById('fire-setting-lyrics-resetpos');
+  if (btnResetPos) {
+    btnResetPos.addEventListener('click', function (e) {
+      e.stopPropagation();
+      state.settings.desktopLyricsLeft = '';
+      state.settings.desktopLyricsTop = '';
+      saveState();
+      applyDesktopLyricsSettings();
+      showToast("悬浮歌词位置已重置为顶部居中");
     });
   }
 

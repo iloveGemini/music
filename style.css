@@ -314,6 +314,21 @@
     display: none;
     padding: 12px;
     box-sizing: border-box;
+    max-height: min(480px, calc(100vh - 120px));
+    overflow-y: auto;
+}
+.fire-settings-dropdown::-webkit-scrollbar {
+    width: 4px;
+}
+.fire-settings-dropdown::-webkit-scrollbar-track {
+    background: transparent;
+}
+.fire-settings-dropdown::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 2px;
+}
+.fire-settings-dropdown::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.3);
 }
 .fire-settings-title {
     font-size: 12px;
@@ -1143,8 +1158,8 @@
     z-index: 99999 !important;
     padding: 14px 20px;
     border-radius: 12px;
-    border: 1px solid var(--fire-border);
-    box-shadow: 0 8px 32px var(--fire-shadow, rgba(0, 0, 0, 0.4));
+    border: none !important;
+    box-shadow: none !important;
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
     text-align: center;
@@ -1155,8 +1170,9 @@
     flex-direction: column;
     justify-content: center;
     align-items: center;
-    transition: background-color 0.2s, box-shadow 0.2s, border-color 0.2s;
+    transition: background-color 0.2s;
     user-select: none;
+    touch-action: none;
 }
 
 #fire-desktop-lyrics.unlocked {
@@ -1164,8 +1180,7 @@
 }
 
 #fire-desktop-lyrics.unlocked:hover {
-    border-color: var(--fire-accent);
-    box-shadow: 0 8px 32px rgba(255, 107, 107, 0.2), 0 0 0 1px var(--fire-accent);
+    background-color: rgba(255, 255, 255, 0.05); /* very subtle highlight on hover when unlocked */
 }
 
 #fire-desktop-lyrics.locked {
@@ -1180,8 +1195,7 @@
     right: 0;
     height: 24px;
     background: rgba(0, 0, 0, 0.75);
-    border: 1px solid var(--fire-border);
-    border-bottom: none;
+    border: none;
     border-radius: 6px 6px 0 0;
     display: flex;
     align-items: center;

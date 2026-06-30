@@ -306,7 +306,7 @@
     top: 55px;
     right: 20px;
     width: 260px;
-    background: var(--SmartThemeBlurTintColor, #1f2937);
+    background: var(--fire-bg-opaque, var(--SmartThemeBlurTintColor, #1f2937)) !important;
     border: 1px solid var(--fire-border);
     border-radius: 8px;
     box-shadow: 0 4px 20px rgba(0,0,0,0.5);
@@ -957,7 +957,7 @@
     cursor: pointer;
 }
 .fire-select option {
-    background: var(--SmartThemeBlurTintColor, #111827);
+    background: var(--fire-bg-opaque, var(--SmartThemeBlurTintColor, #111827)) !important;
     color: var(--fire-text);
 }
 
@@ -976,7 +976,7 @@
 /* Add to Playlist Popup Menu */
 .fire-add-menu {
     position: absolute;
-    background: var(--SmartThemeBlurTintColor, #1f2937);
+    background: var(--fire-bg-opaque, var(--SmartThemeBlurTintColor, #1f2937)) !important;
     border: 1px solid var(--fire-border);
     border-radius: 6px;
     box-shadow: 0 4px 15px rgba(0,0,0,0.5);

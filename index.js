@@ -272,7 +272,7 @@ function updateDynamicThemeColors() {
       opaqueColor = color;
     }
 
-    panel.style.setProperty('--fire-bg-opaque', opaqueColor);
+    doc.body.style.setProperty('--fire-bg-opaque', opaqueColor);
   } catch (e) {
     console.warn('[FIRE] updateDynamicThemeColors error:', e);
   }
@@ -930,6 +930,34 @@ function createUI() {
           </div>
         </div>
       </div>
+
+      <!-- Section 6: Playlist Manager -->
+      <div class="fire-settings-section" style="margin-top: 8px; border-top: 1px solid var(--fire-border); padding-top: 8px;">
+        <div class="fire-settings-section-header" id="fire-settings-header-playlistmgr">
+          <span>歌单导入与备份</span>
+          <i class="fa-solid fa-chevron-right fire-settings-chevron"></i>
+        </div>
+        <div class="fire-settings-section-content" id="fire-settings-content-playlistmgr" style="display: none; padding-top: 6px;">
+          <!-- Part 1: NetEase Playlist Import -->
+          <div style="margin-bottom: 12px; display: flex; flex-direction: column; gap: 6px;">
+            <span style="font-size: 11px; opacity: 0.8;">导入网易云歌单 (链接/ID)</span>
+            <div style="display: flex; gap: 6px;">
+              <input type="text" id="fire-import-netease-input" class="fire-input" style="height: 28px; padding: 4px 8px; font-size: 12px;" placeholder="输入歌单ID或分享链接...">
+              <button id="fire-import-netease-btn" class="fire-btn" style="padding: 4px 10px; font-size: 11px; height: 28px; flex-shrink: 0;">导入</button>
+            </div>
+          </div>
+          
+          <!-- Part 2: Playlist Backup & Restore -->
+          <div style="border-top: 1px solid rgba(255,255,255,0.05); padding-top: 8px; display: flex; flex-direction: column; gap: 6px;">
+            <span style="font-size: 11px; opacity: 0.8;">本地歌单备份与恢复</span>
+            <div style="display: flex; gap: 8px;">
+              <button id="fire-export-backup-btn" class="fire-btn fire-btn-normal" style="flex: 1; padding: 4px; font-size: 11px; height: 28px;" title="备份并导出本地歌单">备份歌单</button>
+              <button id="fire-import-backup-btn" class="fire-btn fire-btn-normal" style="flex: 1; padding: 4px; font-size: 11px; height: 28px;" title="从JSON备份中恢复歌单">恢复歌单</button>
+            </div>
+            <input type="file" id="fire-import-backup-file" style="display: none;" accept=".json">
+          </div>
+        </div>
+      </div>
     </div>
 
     <div id="fire-panel-body">
@@ -1206,6 +1234,47 @@ function bindUIEvents() {
     setupCollapsibleSetting('fire-settings-header-lyrics', 'fire-settings-content-lyrics');
     setupCollapsibleSetting('fire-settings-header-sources', 'fire-settings-content-sources');
     setupCollapsibleSetting('fire-settings-header-logs', 'fire-settings-content-logs');
+    setupCollapsibleSetting('fire-settings-header-playlistmgr', 'fire-settings-content-playlistmgr');
+  }
+
+  // Playlist Manager - NetEase Import Event
+  var importNeteaseBtn = doc.getElementById('fire-import-netease-btn');
+  if (importNeteaseBtn) {
+    importNeteaseBtn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      var input = doc.getElementById('fire-import-netease-input');
+      if (input) {
+        var val = input.value.trim();
+        if (val) {
+          importNetEasePlaylist(val);
+          input.value = '';
+        } else {
+          showToast("请输入网易云歌单ID或链接");
+        }
+      }
+    });
+  }
+
+  // Playlist Manager - Export Backup Event
+  var exportBackupBtn = doc.getElementById('fire-export-backup-btn');
+  if (exportBackupBtn) {
+    exportBackupBtn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      exportPlaylistsBackup();
+    });
+  }
+
+  // Playlist Manager - Import Backup File Upload trigger
+  var importBackupBtn = doc.getElementById('fire-import-backup-btn');
+  var importBackupFile = doc.getElementById('fire-import-backup-file');
+  if (importBackupBtn && importBackupFile) {
+    importBackupBtn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      importBackupFile.click();
+    });
+    importBackupFile.addEventListener('change', function (e) {
+      importPlaylistsBackup(e);
+    });
   }
 
   // Search Sources Checkboxes Events
@@ -1718,15 +1787,21 @@ async function fetchAndSetCover(song) {
   var cd = getDoc().getElementById('fire-cd-cover');
   if (!cd) return;
 
+  cd.onerror = function() {
+    cd.src = DEFAULT_COVER;
+  };
+
+  // Shortcut if we already have the direct cover URL
+  if (song.coverUrl) {
+    cd.src = song.coverUrl;
+    return;
+  }
+
   var id = song.pic_id || song.id;
   if (!id) {
     cd.src = DEFAULT_COVER;
     return;
   }
-
-  cd.onerror = function() {
-    cd.src = DEFAULT_COVER;
-  };
 
   var cacheKey = `${song.source || 'netease'}_${id}_500`;
   var cachedCover = getCache('pic', cacheKey);
@@ -2371,6 +2446,339 @@ function removeSongFromPlaylist(index) {
   list.splice(index, 1);
   saveState();
   renderPlaylistSongs();
+}
+
+// ─── Playlist Import, Export & Backup Utilities ───────────────────────────────
+function showPlaylistSelectionDialog() {
+  return new Promise((resolve) => {
+    var doc = getDoc();
+    var overlay = doc.createElement('div');
+    overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:200000;display:flex;align-items:center;justify-content:center;font-family:sans-serif;backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);';
+    
+    var dialog = doc.createElement('div');
+    dialog.style.cssText = 'background:var(--fire-bg-opaque, #080d14) !important;border:1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)) !important;border-radius:12px;padding:20px;width:320px;max-width:90vw;display:flex;flex-direction:column;gap:12px;box-shadow:0 8px 25px var(--SmartThemeShadowColor, rgba(0,0,0,0.5)) !important;color:var(--SmartThemeBodyColor, #f3f4f6) !important;';
+    
+    dialog.innerHTML = `
+      <div style="font-weight:bold;font-size:14px;border-bottom:1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15));padding-bottom:8px;display:flex;justify-content:space-between;align-items:center;color:var(--SmartThemeBodyColor, #f3f4f6);">
+        <span>选择要导出的歌单</span>
+        <span id="fire-export-select-all" style="font-size:11px;color:var(--fire-accent);cursor:pointer;user-select:none;">取消全选</span>
+      </div>
+      <div id="fire-export-dialog-list" class="fire-scroll" style="max-height:200px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding:4px 0;">
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px;">
+        <button id="fire-export-dialog-cancel" class="fire-btn fire-btn-normal" style="padding:4px 12px;font-size:11px;height:26px;">取消</button>
+        <button id="fire-export-dialog-ok" class="fire-btn" style="padding:4px 12px;font-size:11px;height:26px;">导出</button>
+      </div>
+    `;
+    
+    overlay.appendChild(dialog);
+    doc.body.appendChild(overlay);
+    
+    var listContainer = dialog.querySelector('#fire-export-dialog-list');
+    var playlistsKeys = Object.keys(state.playlists);
+    
+    playlistsKeys.forEach(name => {
+      var label = doc.createElement('label');
+      label.style.cssText = 'display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer;user-select:none;color:var(--SmartThemeBodyColor, #f3f4f6);';
+      label.innerHTML = `<input type="checkbox" value="${name}" checked style="cursor:pointer;"> <span>${name}</span>`;
+      listContainer.appendChild(label);
+    });
+    
+    var allSelected = true;
+    dialog.querySelector('#fire-export-select-all').addEventListener('click', function(e) {
+      e.stopPropagation();
+      var chks = listContainer.querySelectorAll('input[type="checkbox"]');
+      allSelected = !allSelected;
+      chks.forEach(c => c.checked = allSelected);
+      this.textContent = allSelected ? '取消全选' : '全选';
+    });
+    
+    dialog.querySelector('#fire-export-dialog-cancel').addEventListener('click', function(e) {
+      e.stopPropagation();
+      overlay.remove();
+      resolve(null);
+    });
+    
+    dialog.querySelector('#fire-export-dialog-ok').addEventListener('click', function(e) {
+      e.stopPropagation();
+      var chks = listContainer.querySelectorAll('input[type="checkbox"]');
+      var selected = [];
+      chks.forEach(c => {
+        if (c.checked) selected.push(c.value);
+      });
+      overlay.remove();
+      resolve(selected);
+    });
+  });
+}
+
+function showDuplicatePlaylistDecisionDialog(playlistName) {
+  return new Promise((resolve) => {
+    var doc = getDoc();
+    var overlay = doc.createElement('div');
+    overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:200000;display:flex;align-items:center;justify-content:center;font-family:sans-serif;backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);';
+    
+    var dialog = doc.createElement('div');
+    dialog.style.cssText = 'background:var(--fire-bg-opaque, #080d14) !important;border:1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)) !important;border-radius:12px;padding:20px;width:340px;max-width:90vw;display:flex;flex-direction:column;gap:12px;box-shadow:0 8px 25px var(--SmartThemeShadowColor, rgba(0,0,0,0.5)) !important;color:var(--SmartThemeBodyColor, #f3f4f6) !important;';
+    
+    dialog.innerHTML = `
+      <div style="font-weight:bold;font-size:14px;border-bottom:1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15));padding-bottom:8px;color:var(--SmartThemeBodyColor, #f3f4f6);">
+        <span>歌单冲突提示</span>
+      </div>
+      <div style="font-size:12px;line-height:1.4;color:var(--SmartThemeBodyColor, #f3f4f6);">
+        导入的文件中包含歌单 <strong>"${playlistName}"</strong>，但本地已存在同名歌单。请选择您的处理方式：
+      </div>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-top:4px;">
+        <button id="fire-dup-merge" class="fire-btn" style="padding:6px;font-size:12px;text-align:center;">合并歌曲 (去重追加)</button>
+        <button id="fire-dup-overwrite" class="fire-btn fire-btn-normal" style="padding:6px;font-size:12px;text-align:center;">覆盖原有歌单 (本地数据将被替换)</button>
+        <button id="fire-dup-skip" class="fire-btn fire-btn-normal" style="padding:6px;font-size:12px;text-align:center;">跳过该歌单</button>
+      </div>
+    `;
+    
+    overlay.appendChild(dialog);
+    doc.body.appendChild(overlay);
+    
+    dialog.querySelector('#fire-dup-merge').addEventListener('click', function(e) {
+      e.stopPropagation();
+      overlay.remove();
+      resolve('merge');
+    });
+    
+    dialog.querySelector('#fire-dup-overwrite').addEventListener('click', function(e) {
+      e.stopPropagation();
+      overlay.remove();
+      resolve('overwrite');
+    });
+    
+    dialog.querySelector('#fire-dup-skip').addEventListener('click', function(e) {
+      e.stopPropagation();
+      overlay.remove();
+      resolve('skip');
+    });
+  });
+}
+
+async function exportPlaylistsBackup() {
+  var selectedPlaylists = await showPlaylistSelectionDialog();
+  if (!selectedPlaylists || selectedPlaylists.length === 0) {
+    return;
+  }
+  
+  var backupData = {};
+  selectedPlaylists.forEach(name => {
+    backupData[name] = state.playlists[name] || [];
+  });
+  
+  try {
+    var jsonString = JSON.stringify(backupData, null, 2);
+    var blob = new Blob([jsonString], { type: 'application/json' });
+    var url = URL.createObjectURL(blob);
+    
+    var a = document.createElement('a');
+    var dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    var fileName = '';
+    if (selectedPlaylists.length === 1) {
+      fileName = `fire_playlist_${selectedPlaylists[0]}_backup_${dateStr}.json`;
+    } else {
+      fileName = `fire_playlists_backup_${selectedPlaylists.length}个_${dateStr}.json`;
+    }
+    
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast("备份文件已开始下载");
+  } catch (err) {
+    console.error("[FIRE] Export failed:", err);
+    triggerError("备份导出失败: " + err.message);
+  }
+}
+
+async function importPlaylistsBackup(event) {
+  var file = event.target.files[0];
+  if (!file) return;
+  
+  var fileInput = event.target;
+  var reader = new FileReader();
+  
+  reader.onload = async function (e) {
+    try {
+      var importedPlaylists = JSON.parse(e.target.result);
+      if (typeof importedPlaylists !== 'object' || Array.isArray(importedPlaylists) || importedPlaylists === null) {
+        throw new Error("备份数据格式不正确（应为JSON对象格式）");
+      }
+      
+      var keys = Object.keys(importedPlaylists);
+      if (keys.length === 0) {
+        throw new Error("备份文件中未找到任何歌单");
+      }
+      
+      var importedCount = 0;
+      for (var i = 0; i < keys.length; i++) {
+        var playlistName = keys[i];
+        var importedSongs = importedPlaylists[playlistName];
+        if (!Array.isArray(importedSongs)) continue;
+        
+        var cleanedSongs = importedSongs.filter(s => s && s.id && s.name).map(s => {
+          return {
+            id: s.id,
+            name: s.name,
+            artist: s.artist || '未知歌手',
+            album: s.album || '未知专辑',
+            pic_id: s.pic_id || null,
+            coverUrl: s.coverUrl || null,
+            source: s.source || 'netease'
+          };
+        });
+
+        if (state.playlists[playlistName]) {
+          var decision = await showDuplicatePlaylistDecisionDialog(playlistName);
+          if (decision === 'overwrite') {
+            state.playlists[playlistName] = cleanedSongs;
+            importedCount++;
+          } else if (decision === 'merge') {
+            var localSongs = state.playlists[playlistName];
+            cleanedSongs.forEach(song => {
+              var exists = localSongs.some(ls => ls.id === song.id);
+              if (!exists) {
+                localSongs.push(song);
+              }
+            });
+            importedCount++;
+          }
+        } else {
+          state.playlists[playlistName] = cleanedSongs;
+          importedCount++;
+        }
+      }
+      
+      if (importedCount > 0) {
+        saveState();
+        renderPlaylistOptions();
+        renderPlaylistSongs();
+        showToast(`恢复成功！已导入 ${importedCount} 个歌单`);
+      } else {
+        showToast("未导入任何歌单");
+      }
+    } catch (err) {
+      console.error("[FIRE] Import backup failed:", err);
+      triggerError("歌单恢复失败: " + err.message);
+    } finally {
+      fileInput.value = '';
+    }
+  };
+  reader.readAsText(file);
+}
+
+async function importNetEasePlaylist(inputStr) {
+  if (!inputStr) return;
+  
+  var playlistId = '';
+  var trimmed = inputStr.trim();
+  if (/^\d+$/.test(trimmed)) {
+    playlistId = trimmed;
+  } else {
+    var idMatch = trimmed.match(/(?:\?id=|\/playlist\/)(\d+)/);
+    if (idMatch) {
+      playlistId = idMatch[1];
+    }
+  }
+  
+  if (!playlistId) {
+    showToast("无法解析出有效的网易云歌单ID，请检查输入");
+    return;
+  }
+  
+  showToast("正在拉取网易云歌单中...");
+  
+  try {
+    var res = await fetch(`https://music-api.gdstudio.xyz/api.php?types=playlist&source=netease&id=${playlistId}`);
+    if (res.status === 429) {
+      throw new Error("歌单请求频次过高，请 5 分钟后再试");
+    }
+    if (!res.ok) {
+      throw new Error(`HTTP status: ${res.status}`);
+    }
+    
+    var data = await res.json();
+    if (!data || data.code !== 200 || !data.playlist) {
+      throw new Error((data && data.message) || "接口返回歌单数据为空或错误");
+    }
+    
+    var ncmPlaylist = data.playlist;
+    var playlistName = (ncmPlaylist.name || "网易云导入歌单").trim();
+    var tracks = ncmPlaylist.tracks || [];
+    
+    if (tracks.length === 0) {
+      showToast("该歌单中没有可导入的曲目");
+      return;
+    }
+    
+    var importedSongs = tracks.map(track => {
+      var artistName = '未知歌手';
+      if (track.ar && Array.isArray(track.ar)) {
+        artistName = track.ar.map(a => a.name).join(' / ');
+      }
+      
+      var coverUrl = null;
+      if (track.al && track.al.picUrl) {
+        coverUrl = track.al.picUrl;
+        if (window.location.protocol === 'https:' && coverUrl.startsWith('http://')) {
+          coverUrl = coverUrl.replace('http://', 'https://');
+        }
+      }
+      
+      return {
+        id: track.id,
+        name: track.name || '未知歌曲',
+        artist: artistName,
+        album: (track.al && track.al.name) || '未知专辑',
+        pic_id: (track.al && (track.al.pic_str || track.al.pic)) || null,
+        coverUrl: coverUrl,
+        source: 'netease'
+      };
+    });
+    
+    var isNew = false;
+    if (!state.playlists[playlistName]) {
+      state.playlists[playlistName] = [];
+      isNew = true;
+    }
+    
+    var localSongs = state.playlists[playlistName];
+    var addedCount = 0;
+    
+    importedSongs.forEach(song => {
+      var exists = localSongs.some(ls => ls.id === song.id);
+      if (!exists) {
+        localSongs.push(song);
+        addedCount++;
+      }
+    });
+    
+    saveState();
+    
+    if (isNew) {
+      state.currentPlaylist = playlistName;
+      saveState();
+    }
+    
+    renderPlaylistOptions();
+    renderPlaylistSongs();
+    
+    var time = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+    var msg = `成功导入歌单 "${playlistName}"：拉取到 ${tracks.length} 首，入库 ${addedCount} 首`;
+    errorLogs.unshift(`[${time}] ${msg}`);
+    if (errorLogs.length > MAX_ERROR_LOGS) errorLogs.pop();
+    renderLogsUI();
+    
+    showToast(msg);
+  } catch (err) {
+    console.error("[FIRE] Import playlist failed:", err);
+    triggerError("歌单导入失败: " + err.message);
+  }
 }
 
 // ─── Toast System ────────────────────────────────────────────────────────────

@@ -34,9 +34,100 @@ var state = {
     desktopLyricsLongPressTime: 800,
     desktopLyricsZIndex: 99999,
     desktopLyricsLeft: '',
-    desktopLyricsTop: ''
+    desktopLyricsTop: '',
+    searchSources: ['netease', 'joox', 'bilibili'],
+    showErrorToasts: false
   }
 };
+
+// ─── In-Memory Caches & Logging ───────────────────────────────────────────────
+var apiCache = {
+  search: new Map(), // key: query_page_sources -> Array<Song>
+  url: new Map(),    // key: source_id_br -> { url, br, size, expireAt }
+  pic: new Map(),    // key: source_id_size -> coverUrl
+  lyric: new Map()   // key: source_id -> lyricData
+};
+
+var errorLogs = [];
+var MAX_ERROR_LOGS = 10;
+
+function getCache(type, key) {
+  var entry = apiCache[type].get(key);
+  if (!entry) return null;
+  if (entry.expireAt && entry.expireAt < Date.now()) {
+    apiCache[type].delete(key);
+    return null;
+  }
+  return entry.value;
+}
+
+function setCache(type, key, value, ttl = 0) {
+  var expireAt = ttl ? Date.now() + ttl : 0;
+  if (apiCache[type].size >= 100) {
+    var firstKey = apiCache[type].keys().next().value;
+    apiCache[type].delete(firstKey);
+  }
+  apiCache[type].set(key, { value: value, expireAt: expireAt });
+}
+
+function triggerError(msg) {
+  console.error("[FIRE Error]", msg);
+  var time = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+  errorLogs.unshift(`[${time}] ${msg}`);
+  if (errorLogs.length > MAX_ERROR_LOGS) {
+    errorLogs.pop();
+  }
+  renderLogsUI();
+  
+  if (state.settings.showErrorToasts) {
+    showToast(msg);
+  }
+}
+
+function renderLogsUI() {
+  var doc = getDoc();
+  var container = doc.getElementById('fire-logs-container');
+  if (!container) return;
+  if (errorLogs.length === 0) {
+    container.innerHTML = '<div style="opacity:0.5;text-align:center;padding:4px;">暂无运行日志</div>';
+    return;
+  }
+  container.innerHTML = errorLogs.map(log => {
+    var isErr = log.indexOf('错误') !== -1 || log.indexOf('失败') !== -1 || log.indexOf('限流') !== -1;
+    var color = isErr ? 'color:var(--fire-em, #ffbaba);' : 'opacity:0.8;';
+    return `<div style="margin-bottom:4px;line-height:1.2;word-break:break-all;${color}">${log}</div>`;
+  }).join('');
+}
+
+var consecutiveFailures = 0;
+var lastFailedSongId = null;
+
+function handlePlaybackFailure(song, errorMsg) {
+  if (!song) return;
+  if (lastFailedSongId === song.id) return;
+  lastFailedSongId = song.id;
+
+  consecutiveFailures++;
+  triggerError(`播放失败: ${song.name} (${errorMsg})`);
+
+  var queue = state.activeQueue || state.playlists[state.currentPlaylist] || [];
+  var limit = Math.min(3, queue.length || 3);
+
+  if (consecutiveFailures >= limit) {
+    consecutiveFailures = 0;
+    state.isPlaying = false;
+    if (audio) audio.pause();
+    updatePlaybackUI();
+    triggerError("已连续失败多次，自动停止播放");
+  } else {
+    if (state.isPlaying) {
+      triggerError("正在自动尝试下一首...");
+      playNext();
+    } else {
+      updatePlaybackUI();
+    }
+  }
+}
 
 var audio = null;
 var qrBtnObserver = null;
@@ -195,6 +286,8 @@ function initAudio() {
 
   audio.addEventListener('play', function () {
     state.isPlaying = true;
+    consecutiveFailures = 0; // Reset failure counter on successful play
+    lastFailedSongId = null;
     updatePlaybackUI();
   });
 
@@ -214,14 +307,14 @@ function initAudio() {
 
   audio.addEventListener('error', function (e) {
     console.error("[FIRE] Audio error:", e);
-    showToast("播放源出错，自动尝试下一首");
-    playNext();
+    handlePlaybackFailure(state.currentSong, "播放源出错或解码失败");
   });
 }
 
 async function playSong(song) {
   initAudio();
   state.currentSong = song;
+  lastFailedSongId = null; // Clear duplicate failure check for new play attempt
   updatePlaybackUI();
 
   // On mobile, auto-switch to Now Playing tab when playing a song
@@ -244,17 +337,71 @@ async function playSong(song) {
   renderLyrics();
   updateDesktopLyrics(-1, lyricsList);
 
-  showToast("正在加载: " + song.name);
+  if (state.settings.showErrorToasts) {
+    showToast("正在加载: " + song.name);
+  }
 
   try {
-    // 1. Get Streaming URL
-    var urlRes = await fetch(`https://music-api.gdstudio.xyz/api.php?types=url&source=${song.source || 'netease'}&id=${song.id}&br=${state.settings.audioQuality || 999}`);
-    var urlData = await urlRes.json();
-    if (!urlData || !urlData.url) {
-      throw new Error("Empty URL returned from API");
+    // Quality fallbacks: 999 -> 740 -> 320 -> 192 -> 128
+    var qualities = ['999', '740', '320', '192', '128'];
+    var startQuality = state.settings.audioQuality || '999';
+    var startIndex = qualities.indexOf(startQuality);
+    if (startIndex === -1) startIndex = 0;
+
+    var playUrl = null;
+    var finalBr = null;
+    var size = null;
+    var rateLimitHit = false;
+
+    for (var idx = startIndex; idx < qualities.length; idx++) {
+      var currentBr = qualities[idx];
+      var cacheKey = `${song.source || 'netease'}_${song.id}_${currentBr}`;
+      
+      // Try URL Cache
+      var cachedUrlData = getCache('url', cacheKey);
+      if (cachedUrlData) {
+        playUrl = cachedUrlData.url;
+        finalBr = cachedUrlData.br;
+        size = cachedUrlData.size;
+        break;
+      }
+
+      try {
+        var urlRes = await fetch(`https://music-api.gdstudio.xyz/api.php?types=url&source=${song.source || 'netease'}&id=${song.id}&br=${currentBr}`);
+        if (urlRes.status === 429) {
+          rateLimitHit = true;
+          break;
+        }
+        if (!urlRes.ok) {
+          throw new Error(`HTTP status: ${urlRes.status}`);
+        }
+        var urlData = await urlRes.json();
+        if (urlData && urlData.url) {
+          playUrl = urlData.url;
+          finalBr = urlData.br || currentBr;
+          size = urlData.size || 0;
+          // Cache URL data (TTL: 15 minutes)
+          setCache('url', cacheKey, { url: playUrl, br: finalBr, size: size }, 15 * 60 * 1000);
+          break;
+        } else {
+          console.warn(`[FIRE] Empty URL for quality ${currentBr}, trying next...`);
+        }
+      } catch (err) {
+        console.warn(`[FIRE] Fetch URL failed for quality ${currentBr}:`, err);
+      }
     }
 
-    var playUrl = urlData.url;
+    if (rateLimitHit) {
+      triggerError("播放请求被限流，请稍后再试");
+      state.isPlaying = false;
+      updatePlaybackUI();
+      return;
+    }
+
+    if (!playUrl) {
+      throw new Error("所有音质均无法获取音频直链");
+    }
+
     // Force HTTPS if parent runs on HTTPS to bypass mixed-content blocker
     if (window.location.protocol === 'https:' && playUrl.startsWith('http://')) {
       playUrl = playUrl.replace('http://', 'https://');
@@ -262,11 +409,19 @@ async function playSong(song) {
 
     audio.src = playUrl;
     await audio.play();
+    
+    // Add positive run log
+    var brStr = finalBr === '999' ? '24bit无损' : finalBr === '740' ? '16bit无损' : finalBr + 'kbps';
+    var sizeStr = size ? ` (${(size / 1024).toFixed(2)}MB)` : '';
+    var logMsg = `正在播放: ${song.name} - 音质: ${brStr}${sizeStr}`;
+    var time = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+    errorLogs.unshift(`[${time}] ${logMsg}`);
+    if (errorLogs.length > MAX_ERROR_LOGS) errorLogs.pop();
+    renderLogsUI();
+
   } catch (err) {
     console.error("[FIRE] Playback failed:", err);
-    showToast("播放失败，请尝试其他歌曲");
-    state.isPlaying = false;
-    updatePlaybackUI();
+    handlePlaybackFailure(song, err.message);
     return;
   }
 
@@ -275,8 +430,27 @@ async function playSong(song) {
 }
 
 async function fetchAndParseLyrics(songId, source) {
+  var cacheKey = `${source || 'netease'}_${songId}`;
+  var cachedLyrics = getCache('lyric', cacheKey);
+  if (cachedLyrics) {
+    lyricsList = cachedLyrics;
+    renderLyrics();
+    updateDesktopLyrics(-1, lyricsList);
+    return;
+  }
+
   try {
     var res = await fetch(`https://music-api.gdstudio.xyz/api.php?types=lyric&source=${source || 'netease'}&id=${songId}`);
+    if (res.status === 429) {
+      triggerError("获取歌词被限流");
+      lyricsList = [];
+      renderLyrics();
+      updateDesktopLyrics(-1, lyricsList);
+      return;
+    }
+    if (!res.ok) {
+      throw new Error(`HTTP status: ${res.status}`);
+    }
     var data = await res.json();
     if (data && data.lyric) {
       var original = parseLRC(data.lyric);
@@ -313,15 +487,18 @@ async function fetchAndParseLyrics(songId, source) {
       }
       
       lyricsList = original;
+      setCache('lyric', cacheKey, lyricsList);
       renderLyrics();
       updateDesktopLyrics(-1, lyricsList);
     } else {
       lyricsList = [];
+      setCache('lyric', cacheKey, lyricsList);
       renderLyrics();
       updateDesktopLyrics(-1, lyricsList);
     }
   } catch (e) {
     console.warn("[FIRE] Failed to load lyrics:", e);
+    triggerError("获取歌词失败: " + e.message);
     lyricsList = [];
     renderLyrics();
     updateDesktopLyrics(-1, lyricsList);
@@ -430,12 +607,18 @@ async function fetchWithRetry(url, options = {}, retries = 3, delay = 500) {
   for (var i = 0; i < retries; i++) {
     try {
       var res = await fetch(url, options);
+      if (res.status === 429) {
+        throw new Error("429");
+      }
       if (!res.ok) {
         throw new Error(`HTTP status: ${res.status}`);
       }
       var data = await res.json();
       return data;
     } catch (err) {
+      if (err.message === "429") {
+        throw err; // Fail immediately on 429
+      }
       if (i === retries - 1) {
         throw err;
       }
@@ -453,12 +636,28 @@ async function performSearch(query, page) {
 
   var doc = getDoc();
   var container = doc.getElementById('fire-search-results');
+  var pagination = doc.getElementById('fire-search-pagination');
+
+  var sources = state.settings.searchSources || ['netease', 'joox', 'bilibili'];
+  var cacheKey = `${query}_page_${page}_sources_${sources.join('_')}`;
+  
+  // Try Cache
+  var cachedResult = getCache('search', cacheKey);
+  if (cachedResult) {
+    currentSearchSongs = cachedResult;
+    renderSearchResults();
+    return;
+  }
+
   if (container) {
     container.innerHTML = '<div style="text-align:center;padding:20px;opacity:0.6;"><i class="fa-solid fa-spinner fa-spin"></i> 正在全网搜索中...</div>';
   }
+  if (pagination) pagination.style.display = 'none';
 
   try {
-    var sources = ['netease', 'tencent', 'kuwo', 'bilibili'];
+    var rateLimitHit = false;
+    var failedSources = [];
+
     var promises = sources.map(source => 
       fetchWithRetry(`https://music-api.gdstudio.xyz/api.php?types=search&source=${source}&name=${encodeURIComponent(query)}&count=10&pages=${page}`, {}, 3, 500)
         .then(data => {
@@ -469,12 +668,30 @@ async function performSearch(query, page) {
           });
         })
         .catch(err => {
-          console.warn(`[FIRE] Search source ${source} failed after retries:`, err);
+          if (err.message === "429") {
+            rateLimitHit = true;
+          } else {
+            failedSources.push(source);
+          }
+          console.warn(`[FIRE] Search source ${source} failed:`, err);
           return [];
         })
     );
 
     var results = await Promise.all(promises);
+
+    if (rateLimitHit) {
+      triggerError("搜索请求被限流（5分钟内超50次），请稍后再试");
+      if (container) {
+        container.innerHTML = '<div style="text-align:center;padding:20px;color:var(--fire-em);">搜索限制：5分钟内请求超50次限制，请稍候</div>';
+      }
+      return;
+    }
+
+    if (failedSources.length > 0) {
+      triggerError(`部分音源搜索失败: ${failedSources.join(', ')}`);
+    }
+
     var merged = [];
     var maxLength = Math.max(...results.map(r => r.length));
     for (var i = 0; i < maxLength; i++) {
@@ -485,12 +702,16 @@ async function performSearch(query, page) {
       }
     }
 
+    // Cache successful search results (TTL: 10 minutes)
+    setCache('search', cacheKey, merged, 10 * 60 * 1000);
+
     currentSearchSongs = merged;
     renderSearchResults();
   } catch (err) {
     console.error("[FIRE] Search failed:", err);
+    triggerError("搜索出错: " + err.message);
     if (container) {
-      container.innerHTML = '<div style="text-align:center;padding:20px;color:var(--fire-em);">搜索失败，请重试</div>';
+      container.innerHTML = '<div style="text-align:center;padding:20px;color:var(--fire-em);">搜索发生异常，请重试</div>';
     }
   }
 }
@@ -653,6 +874,59 @@ function createUI() {
           </div>
           <div class="fire-settings-sub-item" style="justify-content: flex-end; margin-top: 8px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 8px;">
             <button id="fire-setting-lyrics-resetpos" class="fire-btn fire-btn-normal" style="padding: 4px 10px; font-size: 11px; height: 26px;">重置歌词位置 (顶部居中)</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Section 4: Search Sources -->
+      <div class="fire-settings-section" style="margin-top: 8px; border-top: 1px solid var(--fire-border); padding-top: 8px;">
+        <div class="fire-settings-section-header" id="fire-settings-header-sources">
+          <span>搜索音源</span>
+          <i class="fa-solid fa-chevron-right fire-settings-chevron"></i>
+        </div>
+        <div class="fire-settings-section-content" id="fire-settings-content-sources" style="display: none; padding-top: 4px;">
+          <label class="fire-settings-item" style="display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 13px; cursor: pointer;">
+            <input type="checkbox" name="fire-search-source" value="netease">
+            <span>网易云音乐 (稳定)</span>
+          </label>
+          <label class="fire-settings-item" style="display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 13px; cursor: pointer;">
+            <input type="checkbox" name="fire-search-source" value="joox">
+            <span>JOOX (稳定)</span>
+          </label>
+          <label class="fire-settings-item" style="display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 13px; cursor: pointer;">
+            <input type="checkbox" name="fire-search-source" value="bilibili">
+            <span>Bilibili (稳定)</span>
+          </label>
+          <label class="fire-settings-item" style="display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 13px; cursor: pointer;">
+            <input type="checkbox" name="fire-search-source" value="tencent">
+            <span>QQ 音乐 (部分关闭)</span>
+          </label>
+          <label class="fire-settings-item" style="display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 13px; cursor: pointer;">
+            <input type="checkbox" name="fire-search-source" value="kuwo">
+            <span>酷我音乐 (部分关闭)</span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Section 5: Logs & Alerts -->
+      <div class="fire-settings-section" style="margin-top: 8px; border-top: 1px solid var(--fire-border); padding-top: 8px;">
+        <div class="fire-settings-section-header" id="fire-settings-header-logs">
+          <span>通知与日志</span>
+          <i class="fa-solid fa-chevron-right fire-settings-chevron"></i>
+        </div>
+        <div class="fire-settings-section-content" id="fire-settings-content-logs" style="display: none; padding-top: 4px;">
+          <label class="fire-settings-item" style="display: flex; align-items: center; justify-content: space-between; padding: 4px 0; font-size: 13px; cursor: pointer;">
+            <span>启用错误弹窗提示</span>
+            <input type="checkbox" id="fire-setting-show-error-toasts">
+          </label>
+          <div style="margin-top: 8px; display: flex; flex-direction: column; gap: 4px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; font-size: 11px; opacity: 0.8;">
+              <span>运行日志 (最近10条)</span>
+              <span id="fire-clear-logs-btn" style="cursor: pointer; color: var(--fire-accent);" title="清除日志">清除</span>
+            </div>
+            <div id="fire-logs-container" class="fire-scroll" style="background: rgba(0,0,0,0.3); border: 1px solid var(--fire-border); border-radius: 4px; padding: 6px; font-family: monospace; font-size: 11px; max-height: 120px; overflow-y: auto; white-space: pre-wrap; word-break: break-all;">
+              暂无运行日志
+            </div>
           </div>
         </div>
       </div>
@@ -860,6 +1134,24 @@ function createUI() {
   var inputZIndex = doc.getElementById('fire-setting-lyrics-zindex');
   if (inputZIndex) inputZIndex.value = state.settings.desktopLyricsZIndex !== undefined ? state.settings.desktopLyricsZIndex : 99999;
 
+  // Set default search sources checkboxes
+  if (!state.settings.searchSources) {
+    state.settings.searchSources = ['netease', 'joox', 'bilibili'];
+  }
+  var sourceChks = doc.querySelectorAll('input[name="fire-search-source"]');
+  sourceChks.forEach(chk => {
+    chk.checked = state.settings.searchSources.indexOf(chk.value) !== -1;
+  });
+
+  // Set default show error toasts checkbox
+  var chkShowError = doc.getElementById('fire-setting-show-error-toasts');
+  if (chkShowError) {
+    chkShowError.checked = !!state.settings.showErrorToasts;
+  }
+
+  // Initial logs rendering
+  renderLogsUI();
+
   // Ensure widget is generated and synchronized
   ensureDesktopLyrics(lyricsList, lastActiveLineIdx);
 }
@@ -912,6 +1204,46 @@ function bindUIEvents() {
     setupCollapsibleSetting('fire-settings-header-display', 'fire-settings-content-display');
     setupCollapsibleSetting('fire-settings-header-quality', 'fire-settings-content-quality');
     setupCollapsibleSetting('fire-settings-header-lyrics', 'fire-settings-content-lyrics');
+    setupCollapsibleSetting('fire-settings-header-sources', 'fire-settings-content-sources');
+    setupCollapsibleSetting('fire-settings-header-logs', 'fire-settings-content-logs');
+  }
+
+  // Search Sources Checkboxes Events
+  var sourceChks = doc.querySelectorAll('input[name="fire-search-source"]');
+  sourceChks.forEach(chk => {
+    chk.addEventListener('change', function () {
+      var activeSources = [];
+      sourceChks.forEach(c => {
+        if (c.checked) activeSources.push(c.value);
+      });
+      // Ensure at least one source is checked
+      if (activeSources.length === 0) {
+        showToast("请至少选择一个音源！");
+        this.checked = true;
+        return;
+      }
+      state.settings.searchSources = activeSources;
+      saveState();
+    });
+  });
+
+  // Show Error Toasts Checkbox Event
+  var chkShowError = doc.getElementById('fire-setting-show-error-toasts');
+  if (chkShowError) {
+    chkShowError.addEventListener('change', function () {
+      state.settings.showErrorToasts = !!this.checked;
+      saveState();
+    });
+  }
+
+  // Clear Logs Button Event
+  var clearLogsBtn = doc.getElementById('fire-clear-logs-btn');
+  if (clearLogsBtn) {
+    clearLogsBtn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      errorLogs = [];
+      renderLogsUI();
+    });
   }
 
   // Display Mode Radios
@@ -1396,8 +1728,23 @@ async function fetchAndSetCover(song) {
     cd.src = DEFAULT_COVER;
   };
 
+  var cacheKey = `${song.source || 'netease'}_${id}_500`;
+  var cachedCover = getCache('pic', cacheKey);
+  if (cachedCover) {
+    cd.src = cachedCover;
+    return;
+  }
+
   try {
     var res = await fetch(`https://music-api.gdstudio.xyz/api.php?types=pic&source=${song.source || 'netease'}&id=${id}&size=500`);
+    if (res.status === 429) {
+      triggerError("加载专辑封面被限流");
+      cd.src = DEFAULT_COVER;
+      return;
+    }
+    if (!res.ok) {
+      throw new Error(`HTTP status: ${res.status}`);
+    }
     var data = await res.json();
     if (data && data.url) {
       var coverUrl = data.url;
@@ -1405,11 +1752,13 @@ async function fetchAndSetCover(song) {
         coverUrl = coverUrl.replace('http://', 'https://');
       }
       cd.src = coverUrl;
+      setCache('pic', cacheKey, coverUrl);
     } else {
       cd.src = DEFAULT_COVER;
     }
   } catch (e) {
     console.warn("[FIRE] Failed to fetch cover:", e);
+    triggerError("加载封面失败: " + e.message);
     cd.src = DEFAULT_COVER;
   }
 }
@@ -2026,7 +2375,16 @@ function removeSongFromPlaylist(index) {
 
 // ─── Toast System ────────────────────────────────────────────────────────────
 function showToast(message) {
-  // Toast notifications disabled by user request
+  var doc = getDoc();
+  var toast = doc.getElementById('fire-toast-element');
+  if (!toast) return;
+  toast.textContent = message;
+  toast.classList.add('show');
+  
+  if (window.fireToastTimeout) clearTimeout(window.fireToastTimeout);
+  window.fireToastTimeout = setTimeout(function() {
+    toast.classList.remove('show');
+  }, 3000);
 }
 
 // ─── Panel Entrance Toggle ────────────────────────────────────────────────────
@@ -2096,6 +2454,7 @@ function applyDisplayMode() {
   }
 
   ensureQRButton();
+  ensureWandButton();
 }
 
 // ─── Quick Reply (QR) Button Persistence ──────────────────────────────────────
@@ -2151,7 +2510,21 @@ function ensureQRButton() {
   btnContainer.appendChild(btn);
 }
 
-function ensureWandButton() {
+function removeWandButton() {
+  try {
+    var doc = getDoc();
+    var btn = doc.getElementById('fire_wand_entry');
+    if (btn) btn.remove();
+  } catch (e) {}
+}
+
+export function ensureWandButton() {
+  var mode = state.settings.displayMode || 'wand-modal';
+  if (mode.indexOf('wand-') !== 0) {
+    removeWandButton();
+    return;
+  }
+
   try {
     var doc = getDoc();
     

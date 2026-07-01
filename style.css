@@ -1017,23 +1017,25 @@
 /* Toast Message */
 .fire-toast {
     position: fixed;
-    bottom: 24px;
+    top: 24px;
     left: 50%;
-    transform: translate(-50%, 50px);
-    background: rgba(0, 0, 0, 0.85);
-    color: #fff;
+    transform: translate(-50%, -50px);
+    background: var(--SmartThemeBlurTintColor, rgba(8, 13, 20, 0.85)) !important;
+    backdrop-filter: blur(12px) !important;
+    -webkit-backdrop-filter: blur(12px) !important;
+    color: var(--SmartThemeBodyColor, #f3f4f6) !important;
     padding: 10px 20px;
     border-radius: 30px;
     font-size: 13px;
-    z-index: 100005;
+    z-index: 100005 !important;
     pointer-events: none;
     opacity: 0;
     transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275), opacity 0.3s ease;
     display: flex;
     align-items: center;
     gap: 8px;
-    box-shadow: 0 4px 15px rgba(0,0,0,0.3);
-    border: 1px solid rgba(255,255,255,0.1);
+    box-shadow: 0 4px 15px var(--SmartThemeShadowColor, rgba(0,0,0,0.5)) !important;
+    border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)) !important;
 }
 .fire-toast.show {
     transform: translate(-50%, 0);

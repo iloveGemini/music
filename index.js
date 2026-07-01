@@ -942,7 +942,7 @@ function createUI() {
           <div style="margin-bottom: 12px; display: flex; flex-direction: column; gap: 6px;">
             <span style="font-size: 11px; opacity: 0.8;">导入网易云歌单 (链接/ID)</span>
             <div style="display: flex; gap: 6px;">
-              <input type="text" id="fire-import-netease-input" class="fire-input" style="height: 28px; padding: 4px 8px; font-size: 12px;" placeholder="输入歌单ID或分享链接...">
+              <input type="text" id="fire-import-netease-input" class="fire-input" style="height: 28px; padding: 4px 8px; font-size: 12px; min-width: 0; width: 100%;" placeholder="输入歌单ID或分享链接...">
               <button id="fire-import-netease-btn" class="fire-btn" style="padding: 4px 10px; font-size: 11px; height: 28px; flex-shrink: 0;">导入</button>
             </div>
           </div>

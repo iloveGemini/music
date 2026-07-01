@@ -304,8 +304,9 @@
 .fire-settings-dropdown {
     position: absolute;
     top: 55px;
-    right: 20px;
-    width: 260px;
+    right: 10px;
+    width: 280px;
+    max-width: calc(100% - 20px);
     background: var(--fire-bg-opaque, var(--SmartThemeBlurTintColor, #1f2937)) !important;
     border: 1px solid var(--fire-border);
     border-radius: 8px;
@@ -314,8 +315,10 @@
     display: none;
     padding: 12px;
     box-sizing: border-box;
-    max-height: min(480px, calc(100vh - 120px));
+    max-height: 80vh;
     overflow-y: auto;
+    overflow-x: hidden;
+    touch-action: pan-y;
 }
 .fire-settings-dropdown::-webkit-scrollbar {
     width: 4px;
@@ -345,6 +348,7 @@
     cursor: pointer;
     font-size: 13px;
     color: var(--fire-text);
+    white-space: nowrap;
 }
 .fire-settings-item input {
     cursor: pointer;
@@ -366,6 +370,13 @@
 }
 .fire-settings-section-header:hover {
     background: rgba(255, 255, 255, 0.06);
+}
+.fire-settings-section-header span {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-right: 8px;
+    flex: 1;
 }
 .fire-settings-chevron {
     opacity: 0.7;
@@ -843,6 +854,7 @@
 }
 .fire-input {
     flex: 1;
+    min-width: 0;
     background: rgba(0, 0, 0, 0.2);
     border: 1px solid var(--fire-border);
     color: var(--fire-text);
@@ -865,6 +877,7 @@
     font-size: 13px;
     font-weight: 500;
     transition: background-color 0.2s;
+    flex-shrink: 0;
 }
 .fire-btn:hover {
     background: var(--fire-accent-alt);
@@ -873,6 +886,7 @@
     background: rgba(255,255,255,0.08);
     color: var(--fire-text);
     border: 1px solid var(--fire-border);
+    flex-shrink: 0;
 }
 .fire-btn-normal:hover {
     background: rgba(255,255,255,0.15);
@@ -962,6 +976,7 @@
 }
 .fire-select {
     flex: 1;
+    min-width: 0;
     background: rgba(0, 0, 0, 0.2);
     border: 1px solid var(--fire-border);
     color: var(--fire-text);
@@ -1132,6 +1147,7 @@
     padding: 6px 0;
     font-size: 13px;
     color: var(--fire-text);
+    white-space: nowrap;
 }
 .fire-settings-sub-item-slider {
     padding: 6px 0;
@@ -1140,11 +1156,14 @@
 .fire-settings-sub-item-slider input[type="range"] {
     -webkit-appearance: none;
     appearance: none;
+    width: 100%;
     height: 4px;
     border-radius: 2px;
     background: rgba(255, 255, 255, 0.2);
     outline: none;
     cursor: pointer;
+    margin-top: 6px;
+    box-sizing: border-box;
 }
 .fire-settings-sub-item-slider input[type="range"]::-webkit-slider-thumb {
     -webkit-appearance: none;

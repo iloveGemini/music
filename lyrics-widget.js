@@ -26,6 +26,16 @@ function flashZoneFeedback(el, zone) {
   }, 250);
 }
 
+function isClickOnPlayerUI(e) {
+  if (!e || !e.target || !e.target.closest) return false;
+  return !!(
+    e.target.closest('#fire-panel') ||
+    e.target.closest('#fire-settings-dropdown') ||
+    e.target.closest('[id^="fire-export-"]') ||
+    e.target.closest('[id^="fire-dup-"]')
+  );
+}
+
 function bindGlobalToggleEvents() {
   if (isGlobalToggleEventsBound) return;
   isGlobalToggleEventsBound = true;
@@ -36,6 +46,8 @@ function bindGlobalToggleEvents() {
   
   // Track last tap time for double-tap
   let lastTapTime = 0;
+  let controlsTapTimeout = null;
+  let doubleTapFired = false;
   
   // Helper to check if coordinate is inside widget
   function isInsideWidget(clientX, clientY) {
@@ -76,6 +88,7 @@ function bindGlobalToggleEvents() {
   
   // 1. Contextmenu (Right-click on PC)
   doc.addEventListener('contextmenu', function(e) {
+    if (isClickOnPlayerUI(e)) return;
     if (!state || state.settings.desktopLyricsToggleMethod === 'none') return;
     
     // Check if click was inside widget
@@ -87,6 +100,7 @@ function bindGlobalToggleEvents() {
   
   // 2. Touch/Mouse events for Mobile Long-press & Double-tap
   doc.addEventListener('touchstart', function(e) {
+    if (isClickOnPlayerUI(e)) return;
     if (!state || state.settings.desktopLyricsToggleMethod === 'none') return;
     
     var touch = e.touches[0];
@@ -97,6 +111,11 @@ function bindGlobalToggleEvents() {
       var now = Date.now();
       if (now - lastTapTime < 300) {
         e.preventDefault();
+        doubleTapFired = true;
+        if (controlsTapTimeout) {
+          clearTimeout(controlsTapTimeout);
+          controlsTapTimeout = null;
+        }
         toggleLockState();
         lastTapTime = 0; // reset
         return;
@@ -131,12 +150,15 @@ function bindGlobalToggleEvents() {
     }
   });
   
-  doc.addEventListener('touchend', function() {
+  function clearLongPress() {
     if (longPressTimer) {
       clearTimeout(longPressTimer);
       longPressTimer = null;
     }
-  });
+  }
+  
+  doc.addEventListener('touchend', clearLongPress);
+  doc.addEventListener('touchcancel', clearLongPress);
 
   // 3. Controls Tap/Click Toggle Events (Works even when pointer-events is none or during drag cancel)
   let ctrlTouchStartX = 0;
@@ -144,6 +166,7 @@ function bindGlobalToggleEvents() {
   let ctrlTouchStartTime = 0;
   
   doc.addEventListener('touchstart', function(e) {
+    if (isClickOnPlayerUI(e)) return;
     if (e.touches.length > 0) {
       var touch = e.touches[0];
       ctrlTouchStartX = touch.clientX;
@@ -153,6 +176,12 @@ function bindGlobalToggleEvents() {
   }, { passive: true });
   
   doc.addEventListener('touchend', function(e) {
+    if (isClickOnPlayerUI(e)) return;
+    if (doubleTapFired) {
+      doubleTapFired = false;
+      return;
+    }
+    
     if (!state || !state.settings.desktopLyricsEnabled || !state.settings.desktopLyricsControlsEnabled) return;
     
     var el = doc.getElementById('fire-desktop-lyrics');
@@ -173,50 +202,64 @@ function bindGlobalToggleEvents() {
           if (e.target && e.target.closest && e.target.closest('.action-btn')) {
             return;
           }
+          if (e.cancelable) {
+            e.preventDefault(); // Block synthetic mouseup/click events on mobile
+          }
           var canShowControls = state.settings.desktopLyricsControlsEnabled && 
             (state.settings.desktopLyricsControlsPolicy === 'always' || !state.settings.desktopLyricsLocked);
             
           if (canShowControls) {
-            var ctrlType = state.settings.desktopLyricsControlsType || 'buttons';
-            if (ctrlType === 'zones') {
-              var relativeX = x - rect.left;
-              var zoneWidth = rect.width / 3;
-              if (relativeX < zoneWidth) {
-                flashZoneFeedback(el, 'left');
-                if (controls && typeof controls.playPrev === 'function') {
-                  controls.playPrev();
-                }
-              } else if (relativeX > zoneWidth * 2) {
-                flashZoneFeedback(el, 'right');
-                if (controls && typeof controls.playNext === 'function') {
-                  controls.playNext();
+            var runAction = function() {
+              var ctrlType = state.settings.desktopLyricsControlsType || 'buttons';
+              if (ctrlType === 'zones') {
+                var relativeX = x - rect.left;
+                var zoneWidth = rect.width / 3;
+                if (relativeX < zoneWidth) {
+                  flashZoneFeedback(el, 'left');
+                  if (controls && typeof controls.playPrev === 'function') {
+                    controls.playPrev();
+                  }
+                } else if (relativeX > zoneWidth * 2) {
+                  flashZoneFeedback(el, 'right');
+                  if (controls && typeof controls.playNext === 'function') {
+                    controls.playNext();
+                  }
+                } else {
+                  flashZoneFeedback(el, 'middle');
+                  if (controls && typeof controls.togglePlay === 'function') {
+                    controls.togglePlay();
+                  }
                 }
               } else {
-                flashZoneFeedback(el, 'middle');
-                if (controls && typeof controls.togglePlay === 'function') {
-                  controls.togglePlay();
-                }
+                el.classList.toggle('show-controls');
               }
+            };
+            
+            if (state.settings.desktopLyricsToggleMethod === 'rightclick_doubletap') {
+              if (controlsTapTimeout) clearTimeout(controlsTapTimeout);
+              controlsTapTimeout = setTimeout(runAction, 250);
             } else {
-              el.classList.toggle('show-controls');
+              runAction();
             }
           }
         }
       }
     }
-  }, { passive: true });
+  }, { passive: false });
 
   let ctrlMouseStartX = 0;
   let ctrlMouseStartY = 0;
   let ctrlMouseStartTime = 0;
   
   doc.addEventListener('mousedown', function(e) {
+    if (isClickOnPlayerUI(e)) return;
     ctrlMouseStartX = e.clientX;
     ctrlMouseStartY = e.clientY;
     ctrlMouseStartTime = Date.now();
   });
   
   doc.addEventListener('mouseup', function(e) {
+    if (isClickOnPlayerUI(e)) return;
     if (!state || !state.settings.desktopLyricsEnabled || !state.settings.desktopLyricsControlsEnabled) return;
     
     var el = doc.getElementById('fire-desktop-lyrics');

@@ -1236,31 +1236,6 @@ function createUI() {
 
   // Ensure widget is generated and synchronized
   ensureDesktopLyrics(lyricsList, lastActiveLineIdx);
-  syncLyricsCtrlPolicyDropdown();
-}
-
-function syncLyricsCtrlPolicyDropdown() {
-  var doc = getDoc();
-  var selectPolicy = doc.getElementById('fire-setting-lyrics-ctrl-policy');
-  if (!selectPolicy) return;
-  
-  var optAlways = selectPolicy.querySelector('option[value="always"]');
-  if (!optAlways) return;
-  
-  var isLocked = !!state.settings.desktopLyricsLocked;
-  var ctrlType = state.settings.desktopLyricsControlsType || 'buttons';
-  
-  if (isLocked && ctrlType === 'buttons') {
-    optAlways.disabled = true;
-    if (state.settings.desktopLyricsControlsPolicy === 'always') {
-      state.settings.desktopLyricsControlsPolicy = 'unlocked';
-      selectPolicy.value = 'unlocked';
-      saveState();
-      applyDesktopLyricsSettings();
-    }
-  } else {
-    optAlways.disabled = false;
-  }
 }
 
 function bindUIEvents() {
@@ -1432,7 +1407,6 @@ function bindUIEvents() {
       state.settings.desktopLyricsLocked = !!this.checked;
       saveState();
       applyDesktopLyricsSettings();
-      syncLyricsCtrlPolicyDropdown();
       ensureDesktopLyrics(lyricsList, lastActiveLineIdx);
     });
   }
@@ -1448,7 +1422,6 @@ function bindUIEvents() {
       }
       saveState();
       applyDesktopLyricsSettings();
-      syncLyricsCtrlPolicyDropdown();
       ensureDesktopLyrics(lyricsList, lastActiveLineIdx);
     });
   }
@@ -1459,7 +1432,6 @@ function bindUIEvents() {
     selectCtrlType.addEventListener('change', function () {
       state.settings.desktopLyricsControlsType = this.value;
       saveState();
-      syncLyricsCtrlPolicyDropdown();
       ensureDesktopLyrics(lyricsList, lastActiveLineIdx);
     });
   }

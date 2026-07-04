@@ -9,6 +9,11 @@ import {
   updateDesktopLyrics, 
   clampDesktopLyricsPosition 
 } from './lyrics-widget.js';
+import {
+  initStorySearch,
+  renderStorySearchSettingsHTML,
+  bindStorySearchUIEvents,
+} from './story-search.js';
 
 // ─── Playback & App State ──────────────────────────────────────────────────────
 var state = {
@@ -39,7 +44,17 @@ var state = {
     desktopLyricsControlsType: 'buttons',
     desktopLyricsControlsPolicy: 'always',
     searchSources: ['netease', 'joox', 'bilibili'],
-    showErrorToasts: false
+    showErrorToasts: false,
+    storySearch: {
+      enabled:        false,
+      tagTemplate:    '♪{song} - {artist}♪',
+      switchMode:     'queue',
+      multiTagMode:   'first_cut_rest_queue',
+      allowRetrigger: false,
+      playlistMode:   'any',
+      targetPlaylist: '',
+      fallbackRandom: true,
+    }
   }
 };
 
@@ -254,6 +269,25 @@ function syncViewportHeight() {
   } catch (e) {}
 }
 
+function getOpaqueRGB(colorStr) {
+  if (!colorStr) return null;
+  colorStr = colorStr.trim();
+  var match = colorStr.match(/rgba?\((\d+)[,\s]+(\d+)[,\s]+(\d+)/);
+  if (match) {
+    return 'rgb(' + match[1] + ', ' + match[2] + ', ' + match[3] + ')';
+  }
+  if (colorStr.startsWith('#')) {
+    var hex = colorStr.slice(1);
+    if (hex.length === 3 || hex.length === 4) {
+      return 'rgb(' + parseInt(hex[0]+hex[0], 16) + ', ' + parseInt(hex[1]+hex[1], 16) + ', ' + parseInt(hex[2]+hex[2], 16) + ')';
+    }
+    if (hex.length === 6 || hex.length === 8) {
+      return 'rgb(' + parseInt(hex.slice(0, 2), 16) + ', ' + parseInt(hex.slice(2, 4), 16) + ', ' + parseInt(hex.slice(4, 6), 16) + ')';
+    }
+  }
+  return null;
+}
+
 function updateDynamicThemeColors() {
   try {
     var p = getWin();
@@ -267,18 +301,72 @@ function updateDynamicThemeColors() {
     var color = p.getComputedStyle(temp).color;
     doc.body.removeChild(temp);
 
-    var opaqueColor = '#080d14'; // fallback
-    var match = color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
-    if (match) {
-      opaqueColor = 'rgb(' + match[1] + ', ' + match[2] + ', ' + match[3] + ')';
-    } else if (color.startsWith('#')) {
-      opaqueColor = color;
+
+
+    var opaqueColor = getOpaqueRGB(color);
+
+    if (!opaqueColor) {
+      var directVal = p.getComputedStyle(doc.documentElement).getPropertyValue('--SmartThemeBlurTintColor');
+      opaqueColor = getOpaqueRGB(directVal);
+    }
+
+    if (!opaqueColor) {
+      var inlineVal = doc.documentElement.style.getPropertyValue('--SmartThemeBlurTintColor');
+      opaqueColor = getOpaqueRGB(inlineVal);
+    }
+
+    if (!opaqueColor) {
+      opaqueColor = 'rgb(8, 13, 20)'; // default dark
     }
 
     doc.body.style.setProperty('--fire-bg-opaque', opaqueColor);
+    panel.style.setProperty('background', opaqueColor, 'important');
   } catch (e) {
     console.warn('[FIRE] updateDynamicThemeColors error:', e);
   }
+}
+
+// ─── Playback Offset Utils ───────────────────────────────────────────────────
+var pendingStartVal = null;
+
+function parseStartTime(val, duration) {
+  if (!val) return 0;
+  val = String(val).trim();
+  if (!val) return 0;
+
+  // 1. 百分比: 如 30%
+  if (val.endsWith('%')) {
+    var pct = parseFloat(val) / 100;
+    if (!isNaN(pct)) return duration * pct;
+  }
+
+  // 2. 分数: 如 1/3
+  if (val.indexOf('/') !== -1) {
+    var parts = val.split('/');
+    var num = parseFloat(parts[0]);
+    var den = parseFloat(parts[1]);
+    if (!isNaN(num) && !isNaN(den) && den !== 0) {
+      return duration * (num / den);
+    }
+  }
+
+  // 3. 时间格式: 如 01:30 或 1:30
+  if (val.indexOf(':') !== -1) {
+    var parts = val.split(':');
+    var mins = parseFloat(parts[0]);
+    var secs = parseFloat(parts[1]);
+    if (!isNaN(mins) && !isNaN(secs)) {
+      return mins * 60 + secs;
+    }
+  }
+
+  // 4. 绝对秒数: 如 90
+  var sec = parseFloat(val);
+  if (!isNaN(sec)) {
+    return sec;
+  }
+
+  return 0;
 }
 
 // ─── Audio Engine & Playback Logic ───────────────────────────────────────────
@@ -286,6 +374,18 @@ function initAudio() {
   if (audio) return;
   audio = new Audio();
   audio.volume = state.volume;
+
+  // 监听 loadedmetadata 拿到时长后设定起播时间偏移量
+  audio.addEventListener('loadedmetadata', function () {
+    if (pendingStartVal) {
+      var targetTime = parseStartTime(pendingStartVal, audio.duration);
+      pendingStartVal = null; // 清除避免重复触发
+      if (targetTime > 0 && targetTime < audio.duration) {
+        audio.currentTime = targetTime;
+        console.log(`[FIRE] Setting start playback time to: ${targetTime}s (duration: ${audio.duration}s)`);
+      }
+    }
+  });
 
   audio.addEventListener('play', function () {
     state.isPlaying = true;
@@ -319,6 +419,20 @@ async function playSong(song) {
   state.currentSong = song;
   lastFailedSongId = null; // Clear duplicate failure check for new play attempt
   updatePlaybackUI();
+
+  // 获取起播时间（歌曲特有起播设置优先，其次是剧情触发时的起播设置，最后根据全局范围配置使用起播设置）
+  var globalStartPos = state.settings.storySearch && state.settings.storySearch.defaultStartPos;
+  var globalStartScope = state.settings.storySearch && state.settings.storySearch.defaultStartPosScope || 'story_only';
+
+  var startVal = song.startTime;
+  if (!startVal) {
+    if (song.storyPlayTime) {
+      startVal = song.storyPlayTime;
+    } else if (globalStartScope === 'global') {
+      startVal = globalStartPos;
+    }
+  }
+  pendingStartVal = startVal;
 
   // On mobile, auto-switch to Now Playing tab when playing a song
   var isMobile = (window.parent || window).innerWidth <= 760;
@@ -998,6 +1112,10 @@ function createUI() {
           </div>
         </div>
       </div>
+
+      <!-- Section 7: Story Search (injected from story-search.js) -->
+      ${renderStorySearchSettingsHTML()}
+
     </div>
 
     <div id="fire-panel-body">
@@ -1136,6 +1254,7 @@ function createUI() {
   updateVolumeUI();
   updateLoopModeUI();
   bindUIEvents();
+  bindStorySearchUIEvents(doc);
   updateTabUI();
   setViewMode(state.viewMode || 'cd');
   renderPlaylistOptions();
@@ -2243,14 +2362,27 @@ function renderPlaylistSongs() {
     };
     var badge = sourceBadges[song.source] || '<span class="fire-source-badge">其它</span>';
 
+    var tagBadges = Array.isArray(song.tags) && song.tags.length > 0
+      ? song.tags.map(function(t) { return `<span class="fire-tag-badge" data-tag="${t.replace(/"/g,'&quot;')}">${t}</span>`; }).join('')
+      : '';
+    var startTimeBadge = song.startTime
+      ? `<span class="fire-time-badge" style="background:rgba(59, 130, 246, 0.15);color:#60a5fa;border:1px solid rgba(59, 130, 246, 0.3);padding:2px 6px;border-radius:4px;font-size:10px;margin-right:4px;cursor:pointer;" title="点击修改起播时间"><i class="fa-regular fa-clock"></i> ${song.startTime}</span>`
+      : '';
+    var tagDisplay = !isVirtual
+      ? `<div class="fire-tag-row">${startTimeBadge}${tagBadges}<span class="fire-tag-add">＋标签</span></div>`
+      : '';
+
     item.innerHTML = `
       <div style="font-size:11px;opacity:0.5;width:16px;text-align:right;">${idx + 1}</div>
       <div class="fire-music-item-info">
         <div class="fire-music-item-title">${badge} ${song.name}</div>
         <div class="fire-music-item-meta">${artistName} - ${song.album || '未知专辑'}</div>
+        ${tagDisplay}
       </div>
       <div class="fire-music-item-actions">
         ${song.album ? `<button class="fire-music-item-btn album-btn" title="查看专辑"><i class="fa-solid fa-compact-disc"></i></button>` : ''}
+        ${!isVirtual ? `<button class="fire-music-item-btn time-btn" title="编辑起播时间"><i class="fa-regular fa-clock"></i></button>` : ''}
+        ${!isVirtual ? `<button class="fire-music-item-btn tag-btn" title="编辑 Tag"><i class="fa-solid fa-tag"></i></button>` : ''}
         <button class="fire-music-item-btn remove remove-btn" title="${isVirtual ? '从队列移出' : '从歌单移除'}">
           <i class="fa-solid fa-trash"></i>
         </button>
@@ -2277,6 +2409,51 @@ function renderPlaylistSongs() {
       }
     });
 
+    if (!isVirtual) {
+      // Tag 按钮
+      var tagBtn = item.querySelector('.tag-btn');
+      if (tagBtn) {
+        tagBtn.addEventListener('click', function (e) {
+          e.stopPropagation();
+          openTagEditor(song, function () { saveState(); renderPlaylistSongs(); });
+        });
+      }
+      // 起播时间按钮
+      var timeBtn = item.querySelector('.time-btn');
+      if (timeBtn) {
+        timeBtn.addEventListener('click', function (e) {
+          e.stopPropagation();
+          openStartTimeEditor(song, function () { saveState(); renderPlaylistSongs(); });
+        });
+      }
+      // 点击已有标签删除
+      item.querySelectorAll('.fire-tag-badge').forEach(function (badge) {
+        badge.addEventListener('click', function (e) {
+          e.stopPropagation();
+          var tag = this.dataset.tag;
+          if (!Array.isArray(song.tags)) return;
+          var tidx = song.tags.indexOf(tag);
+          if (tidx !== -1) { song.tags.splice(tidx, 1); saveState(); renderPlaylistSongs(); }
+        });
+      });
+      // 点击起播时间标签修改
+      var timeBadge = item.querySelector('.fire-time-badge');
+      if (timeBadge) {
+        timeBadge.addEventListener('click', function (e) {
+          e.stopPropagation();
+          openStartTimeEditor(song, function () { saveState(); renderPlaylistSongs(); });
+        });
+      }
+      // 「＋标签」快捷添加
+      var addTagEl = item.querySelector('.fire-tag-add');
+      if (addTagEl) {
+        addTagEl.addEventListener('click', function (e) {
+          e.stopPropagation();
+          openTagEditor(song, function () { saveState(); renderPlaylistSongs(); });
+        });
+      }
+    }
+
     if (song.album) {
       item.querySelector('.album-btn').addEventListener('click', function (e) {
         e.stopPropagation();
@@ -2285,6 +2462,42 @@ function renderPlaylistSongs() {
     }
 
     container.appendChild(item);
+  });
+}
+
+// ─── Tag 编辑器 ───────────────────────────────────────────────────────────────
+function openTagEditor(song, onSave) {
+  if (!Array.isArray(song.tags)) song.tags = [];
+  var current = song.tags.join(', ');
+  showPrompt(
+    '输入 Tag（多个用逗号分隔，点击歌单中的标签可删除）：',
+    current,
+    `编辑 Tag —— ${song.name}`
+  ).then(function (val) {
+    if (val === null || val === undefined) return; // 取消
+    var tags = val.split(/[,，]+/).map(function (t) { return t.trim(); }).filter(Boolean);
+    song.tags = tags;
+    saveState();
+    if (typeof onSave === 'function') onSave();
+  });
+}
+
+function openStartTimeEditor(song, onSave) {
+  showPrompt(
+    '请输入这首歌的起播时间（支持：分数如 1/3，百分比如 30%，分:秒如 01:20，秒数如 45，留空为默认）：',
+    song.startTime || '',
+    `编辑起播时间 —— ${song.name}`
+  ).then(function (timeVal) {
+    if (timeVal !== null && timeVal !== undefined) {
+      var cleanTime = timeVal.trim();
+      if (cleanTime) {
+        song.startTime = cleanTime;
+      } else {
+        delete song.startTime;
+      }
+      saveState();
+      if (typeof onSave === 'function') onSave();
+    }
   });
 }
 
@@ -3098,6 +3311,15 @@ export function init() {
     playNext: playNext,
     playPrev: playPrev,
     togglePlay: togglePlayPause
+  });
+  initStorySearch(state, {
+    playSong:     playSong,
+    triggerError: triggerError,
+    showToast:    showToast,
+    saveState:    saveState,
+    getDoc:       getDoc,
+    setCache:     setCache,
+    getCache:     getCache,
   });
   createUI();
 

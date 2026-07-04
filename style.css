@@ -7,6 +7,7 @@
     --fire-accent: var(--SmartThemeQuoteColor, #ff6b6b);
     --fire-accent-alt: var(--SmartThemeUnderlineColor, #ffa8a8);
     --fire-em: var(--SmartThemeEmColor, #ffbaba);
+    --fire-bg-opaque: color-mix(in srgb, var(--SmartThemeBlurTintColor, #080d14) 100%, #000000);
 }
 
 #fire-overlay {
@@ -942,15 +943,18 @@
 }
 .fire-music-item-actions {
     display: flex;
+    align-items: center;
     gap: 6px;
 }
 .fire-music-item-btn {
     background: none;
     border: none;
+    padding: 0 !important;
+    margin: 0 !important;
     color: var(--fire-text);
     opacity: 0.4;
     cursor: pointer;
-    font-size: 12px;
+    font-size: 13px;
     transition: opacity 0.2s, color 0.2s;
     width: 24px;
     height: 24px;
@@ -958,6 +962,7 @@
     align-items: center;
     justify-content: center;
     border-radius: 4px;
+    box-sizing: border-box;
 }
 .fire-music-item-btn:hover {
     opacity: 1;
@@ -1365,5 +1370,79 @@
 
 #fire-desktop-lyrics.flash-right {
     background: linear-gradient(90deg, rgba(255,255,255,0) 66%, rgba(255,255,255,0.15) 100%) !important;
+}
+
+/* ─── Tag Badges (Playlist Song Tags) ──────────────────────────────────────── */
+
+.fire-tag-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+    margin-top: 3px;
+}
+
+.fire-tag-badge {
+    display: inline-flex;
+    align-items: center;
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: rgba(168, 85, 247, 0.18);
+    border: 1px solid rgba(168, 85, 247, 0.35);
+    color: var(--fire-accent, #a855f7);
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+    white-space: nowrap;
+    line-height: 1.4;
+}
+
+.fire-tag-badge:hover {
+    background: rgba(239, 68, 68, 0.22);
+    border-color: rgba(239, 68, 68, 0.45);
+    color: #f87171;
+    text-decoration: line-through;
+}
+
+.fire-tag-badge:hover::after {
+    content: ' ✕';
+}
+
+.fire-tag-add {
+    display: inline-flex;
+    align-items: center;
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 999px;
+    border: 1px dashed rgba(255,255,255,0.2);
+    color: rgba(255,255,255,0.35);
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s;
+    line-height: 1.4;
+    white-space: nowrap;
+}
+
+.fire-tag-add:hover {
+    border-color: var(--fire-accent, #a855f7);
+    color: var(--fire-accent, #a855f7);
+}
+
+/* ─── Story Anchor Spans (In-Chat Music Tags) ────────────────────────────────  */
+
+.fire-story-anchor {
+    border-radius: 3px;
+    padding: 0 1px;
+    transition: background 0.15s;
+    position: relative;
+}
+
+.fire-story-anchor[data-fire-triggered="1"] {
+    opacity: 0.55;
+}
+
+.fire-story-anchor:not([data-fire-triggered="1"])::after {
+    content: ' ♫';
+    font-size: 0.85em;
+    opacity: 0.7;
 }
 

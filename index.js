@@ -547,6 +547,10 @@ async function playSong(song) {
 
   } catch (err) {
     console.error("[FIRE] Playback failed:", err);
+    // Ignore AbortError / pause interruptions as they are normal lifecycle changes, not actual stream errors
+    if (err.name === 'AbortError' || (err.message && err.message.includes('interrupted by a call to pause'))) {
+      return;
+    }
     handlePlaybackFailure(song, err.message);
     return;
   }

@@ -430,6 +430,14 @@ export function applyDesktopLyricsSettings() {
   if (curLine) curLine.style.fontSize = baseSize + 'px';
   if (transLine) transLine.style.fontSize = Math.max(12, Math.round(baseSize * 0.75)) + 'px';
   
+  // Apply text alignment
+  var alignVal = state.settings.desktopLyricsAlign || 'center';
+  el.style.textAlign = alignVal;
+  var lyricLines = el.querySelectorAll('.fire-desktop-lyric-line');
+  lyricLines.forEach(function(line) {
+    line.style.textAlign = alignVal;
+  });
+  
   // Convert hex background color to rgba with opacity
   var bgColor = state.settings.desktopLyricsBgColor || '#080d14';
   var opacity = (state.settings.desktopLyricsBgOpacity !== undefined ? state.settings.desktopLyricsBgOpacity : 60) / 100;

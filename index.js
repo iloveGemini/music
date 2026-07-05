@@ -43,6 +43,7 @@ var state = {
     desktopLyricsControlsEnabled: false,
     desktopLyricsControlsType: 'buttons',
     desktopLyricsControlsPolicy: 'always',
+    desktopLyricsAlign: 'center',
     searchSources: ['netease', 'joox', 'bilibili'],
     showErrorToasts: false,
     storySearch: {
@@ -1012,6 +1013,14 @@ function createUI() {
             <span>背景颜色</span>
             <input type="color" id="fire-setting-lyrics-bgcolor">
           </div>
+          <div class="fire-settings-sub-item" style="flex-direction: column; align-items: stretch; gap: 4px; margin-top: 4px;">
+            <span style="font-size: 11px;">歌词对齐方式</span>
+            <select id="fire-setting-lyrics-align" class="fire-select" style="padding: 4px 8px; font-size: 12px; height: 28px;">
+              <option value="left">左对齐</option>
+              <option value="center">居中对齐</option>
+              <option value="right">右对齐</option>
+            </select>
+          </div>
           <div class="fire-settings-sub-item-slider">
             <div style="display: flex; justify-content: space-between; font-size: 11px;">
               <span>背景不透明度</span>
@@ -1305,6 +1314,9 @@ function createUI() {
 
   var inputBgColor = doc.getElementById('fire-setting-lyrics-bgcolor');
   if (inputBgColor) inputBgColor.value = state.settings.desktopLyricsBgColor || '#080d14';
+
+  var selectAlign = doc.getElementById('fire-setting-lyrics-align');
+  if (selectAlign) selectAlign.value = state.settings.desktopLyricsAlign || 'center';
 
   var inputBgOpacity = doc.getElementById('fire-setting-lyrics-bgopacity');
   var valOpacity = doc.getElementById('fire-setting-lyrics-opacity-val');
@@ -1619,6 +1631,16 @@ function bindUIEvents() {
   if (inputBgColor) {
     inputBgColor.addEventListener('input', function () {
       state.settings.desktopLyricsBgColor = this.value;
+      saveState();
+      applyDesktopLyricsSettings();
+    });
+  }
+
+  // Alignment Selector
+  var selectAlign = doc.getElementById('fire-setting-lyrics-align');
+  if (selectAlign) {
+    selectAlign.addEventListener('change', function () {
+      state.settings.desktopLyricsAlign = this.value;
       saveState();
       applyDesktopLyricsSettings();
     });

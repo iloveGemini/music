@@ -764,6 +764,7 @@ export function initStorySearch(state, callbacks) {
     enableScrollPlay:   true,
     enableHighlight:    true,
     defaultStartPos:    '',
+    wiTemplate:     '[FIRE Music Reference - {{playlist_name}}]\n以下是歌单中的歌曲，可在剧情中选用：\n\n{{songs_list}}\n\n在剧情中需要播放音乐时，请在发言中包含格式：{{play_tag}}\n例如：{{play_example}}',
   };
   if (!_state.settings.storySearch) _state.settings.storySearch = {};
   
@@ -921,6 +922,17 @@ export function renderStorySearchSettingsHTML() {
         </div>
       </div>
 
+      <div class="fire-settings-sub-item" style="flex-direction:column;align-items:stretch;gap:4px;margin-top:6px;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <span style="font-size:11px;">世界书条目内容模板</span>
+          <i class="fa-solid fa-expand fire-story-template-expand-btn" style="cursor:pointer; opacity:0.7; font-size:12px;" title="全屏编辑"></i>
+        </div>
+        <textarea id="fire-story-wi-template" class="fire-textarea"
+          style="height:60px;padding:6px 8px;font-size:11px;resize:vertical;font-family:monospace;background:rgba(0,0,0,0.25);border:1px solid var(--fire-border);color:inherit;border-radius:4px;"
+          placeholder="支持占位符：{{playlist_name}}, {{play_tag}}, {{play_example}}, {{songs_list}}"></textarea>
+        <span style="font-size:10px;opacity:0.5;line-height:1.2;">可用占位符：{{playlist_name}} (歌单名), {{play_tag}} (点歌格式), {{play_example}} (播歌示例), {{songs_list}} (歌曲列表)</span>
+      </div>
+
       <div style="margin-top:8px;border-top:1px solid rgba(255,255,255,0.05);padding-top:6px;">
         <button id="fire-story-export-wi-btn" class="fire-btn fire-btn-normal"
           style="width:100%;padding:6px;font-size:12px;">
@@ -1013,8 +1025,15 @@ function showStorySearchHelp() {
         </div>
 
         <div>
-          <b style="color:var(--SmartThemeQuoteColor, #a855f7);">4. 世界书联动</b>
-          <p style="margin: 4px 0 0 0; opacity: 0.85;">点击底部的“生成世界书条目”，能直接将您所选歌单的全部歌曲列表以及播歌提示词，自动以常驻条目的形式写入新建世界书或当前角色绑定的世界书中，使得 AI 能够随时查阅并准确点播您歌单内的音乐。</p>
+          <b style="color:var(--SmartThemeQuoteColor, #a855f7);">4. 世界书联动与自定义内容模板</b>
+          <p style="margin: 4px 0 0 0; opacity: 0.85;">
+            • <b>一键导出</b>：点击底部的“生成世界书条目”，自动将所选歌单列表及提示词写入指定的世界书中，使 AI 随时可以参考并准确点歌。<br>
+            • <b>自定义条目模板</b>：在设置面板中，支持通过配置模板来个性化导出的世界书文本格式。点击输入框右侧的<b>全屏编辑按钮</b>（展开图标）即可进入大屏编辑状态。可用占位符：<br>
+            &nbsp;&nbsp;- <code>{{playlist_name}}</code>：歌单名称。<br>
+            &nbsp;&nbsp;- <code>{{play_tag}}</code>：当前配置的点歌匹配标签。<br>
+            &nbsp;&nbsp;- <code>{{play_example}}</code>：自动生成的第一个点歌指令例句。<br>
+            &nbsp;&nbsp;- <code>{{songs_list}}</code>：被格式化好的歌曲列表。
+          </p>
         </div>
 
         <div>
@@ -1054,6 +1073,107 @@ function showStorySearchHelp() {
   parentDoc.getElementById('fire-story-help-close').addEventListener('click', function () { modal.remove(); });
   parentDoc.getElementById('fire-story-help-ok').addEventListener('click', function () { modal.remove(); });
   modal.addEventListener('click', function (e) { if (e.target === modal) modal.remove(); });
+}
+
+// ─── 全屏模板编辑器 ────────────────────────────────────────────────────────────
+function showFullScreenTemplateEditor() {
+  var parentDoc = getSafeParentDocument();
+  var existing = parentDoc.getElementById('fire-story-template-modal');
+  if (existing) existing.remove();
+
+  var ss = _state.settings.storySearch;
+  var currentVal = ss.wiTemplate || '[FIRE Music Reference - {{playlist_name}}]\n以下是歌单中的歌曲，可在剧情中选用：\n\n{{songs_list}}\n\n在剧情中需要播放音乐时，请在发言中包含格式：{{play_tag}}\n例如：{{play_example}}';
+
+  // Compute opaque background
+  var opaqueBg = 'rgb(8, 13, 20)';
+  try {
+    var temp = parentDoc.createElement('div');
+    temp.style.color = 'var(--SmartThemeBlurTintColor)';
+    parentDoc.body.appendChild(temp);
+    var parentColor = getSafeParentWindow().getComputedStyle(temp).color;
+    parentDoc.body.removeChild(temp);
+
+    var resolved = getOpaqueRGB(parentColor);
+    if (!resolved) {
+      var directVal = getSafeParentWindow().getComputedStyle(parentDoc.documentElement).getPropertyValue('--SmartThemeBlurTintColor');
+      resolved = getOpaqueRGB(directVal);
+    }
+    if (resolved) {
+      opaqueBg = resolved;
+    }
+  } catch (e) {}
+
+  var modal = parentDoc.createElement('div');
+  modal.id = 'fire-story-template-modal';
+  modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;width:100vw;height:100vh;z-index:2999999;background:rgba(9,9,11,0.65);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;box-sizing:border-box;';
+  modal.innerHTML = `
+    <div style="
+      background: ${opaqueBg} !important;
+      border: 1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.15)) !important;
+      border-radius: 16px;
+      padding: 24px;
+      width: 720px;
+      max-width: 90vw;
+      height: 600px;
+      max-height: 85vh;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      color: var(--SmartThemeBodyColor, #f4f4f5) !important;
+      font-family: system-ui, -apple-system, sans-serif;
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.3), 0 10px 10px -5px rgba(0, 0, 0, 0.2);
+      box-sizing: border-box;
+    ">
+      <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.1)); padding-bottom: 10px;">
+        <span style="font-size: 15px; font-weight: 600; color: var(--SmartThemeBodyColor, #ffffff) !important; display: flex; align-items: center; gap: 8px;">
+          <svg style="width: 18px; height: 18px; fill: var(--SmartThemeQuoteColor, #a855f7);" viewBox="0 0 24 24"><path d="M3 17h2v2H3v-2zm0-4h2v2H3v-2zm0-4h2v2H3V9zm0-4h2v2H3V5zm4 12h14v2H7v-2zm0-4h14v2H7v-2zm0-4h14v2H7V9zm0-4h14v2H7V5z"/></svg>
+          编辑世界书条目模板
+        </span>
+        <span id="fire-story-template-close" style="cursor: pointer; opacity: 0.5; font-size: 20px; line-height: 1; color: var(--SmartThemeEmColor, #a1a1aa); transition: opacity 0.2s;">✕</span>
+      </div>
+
+      <div style="flex: 1; display: flex; flex-direction: column; gap: 8px; min-height: 0;">
+        <textarea id="fire-story-template-textarea" style="
+          flex: 1; width: 100%; height: 100%; padding: 12px; font-size: 13px; border-radius: 8px;
+          background: var(--SmartThemeChatTintColor, rgba(0,0,0,0.1)); border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); color: var(--SmartThemeBodyColor, #ffffff);
+          font-family: monospace; outline: none; resize: none; box-sizing: border-box; line-height: 1.5;
+        "></textarea>
+        <span style="font-size:11px;opacity:0.6;">可用占位符：{{playlist_name}} (歌单名), {{play_tag}} (点歌格式), {{play_example}} (播歌示例), {{songs_list}} (歌曲列表)</span>
+      </div>
+
+      <div style="display: flex; gap: 10px; justify-content: flex-end; border-top: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.1)); padding-top: 12px;">
+        <button id="fire-story-template-cancel" style="
+          padding: 8px 16px; font-size: 13px; border-radius: 8px; border: 1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.15));
+          background: transparent; color: var(--SmartThemeEmColor, #a1a1aa); cursor: pointer; transition: all 0.2s;
+        ">取消</button>
+        <button id="fire-story-template-save" style="
+          padding: 8px 16px; font-size: 13px; border-radius: 8px; border: none;
+          background: var(--SmartThemeQuoteColor, #a855f7); color: var(--SmartThemeBodyColor, #ffffff); cursor: pointer; font-weight: 500; transition: all 0.2s;
+        ">保存</button>
+      </div>
+    </div>
+  `;
+  parentDoc.body.appendChild(modal);
+
+  var textarea = parentDoc.getElementById('fire-story-template-textarea');
+  textarea.value = currentVal;
+
+  parentDoc.getElementById('fire-story-template-close').addEventListener('click', function () { modal.remove(); });
+  parentDoc.getElementById('fire-story-template-cancel').addEventListener('click', function () { modal.remove(); });
+  modal.addEventListener('click', function (e) { if (e.target === modal) modal.remove(); });
+
+  parentDoc.getElementById('fire-story-template-save').addEventListener('click', function () {
+    var newVal = textarea.value;
+    ss.wiTemplate = newVal;
+    _saveState();
+
+    // Sync back to the textarea in settings if it is open
+    var localTextarea = document.getElementById('fire-story-wi-template');
+    if (localTextarea) {
+      localTextarea.value = newVal;
+    }
+    modal.remove();
+  });
 }
 
 // ─── 设置面板事件绑定 ─────────────────────────────────────────────────────────
@@ -1212,9 +1332,26 @@ export function bindStorySearchUIEvents(doc) {
     selTarget.addEventListener('change', function () { ss().targetPlaylist = this.value; _saveState(); });
   }
 
+  var txtWiTemplate = doc.getElementById('fire-story-wi-template');
+  if (txtWiTemplate) {
+    txtWiTemplate.value = ss().wiTemplate || '[FIRE Music Reference - {{playlist_name}}]\n以下是歌单中的歌曲，可在剧情中选用：\n\n{{songs_list}}\n\n在剧情中需要播放音乐时，请在发言中包含格式：{{play_tag}}\n例如：{{play_example}}';
+    txtWiTemplate.addEventListener('change', function () {
+      ss().wiTemplate = this.value;
+      _saveState();
+    });
+  }
+
   var btnExport = doc.getElementById('fire-story-export-wi-btn');
   if (btnExport) {
     btnExport.addEventListener('click', function () { showWIExportModal(doc); });
+  }
+
+  var btnExpandTemplate = doc.querySelector('.fire-story-template-expand-btn');
+  if (btnExpandTemplate) {
+    btnExpandTemplate.addEventListener('click', function (e) {
+      e.stopPropagation();
+      showFullScreenTemplateEditor();
+    });
   }
 }
 
@@ -1349,19 +1486,37 @@ function showWIExportModal(doc) {
                 background: var(--SmartThemeChatTintColor, rgba(0,0,0,0.1)); border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); color: var(--SmartThemeBodyColor, #ffffff); outline: none;
               " placeholder="输入条目注释...">
             </div>
+            <div style="display: flex; flex-direction: column; gap: 4px; flex: 2; min-width: 140px;">
+              <span style="font-size: 11px; opacity: 0.7; color: var(--SmartThemeBodyColor);">位置 (Position)</span>
+              <select id="fire-wi-entry-position" style="
+                height: 32px; padding: 0 10px; font-size: 12px; border-radius: 6px;
+                background: var(--SmartThemeChatTintColor, rgba(0,0,0,0.1)); border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); color: var(--SmartThemeBodyColor, #ffffff); outline: none;
+              ">
+                <option value="0|0">角色定义前（↑ Char）</option>
+                <option value="1|0">角色定义后（↓ Char）</option>
+                <option value="5|0">示例消息前（↑ EM）</option>
+                <option value="6|0">示例消息后（↓ EM）</option>
+                <option value="2|0">作者注释前（↑ AN）</option>
+                <option value="3|0">作者注释后（↓ AN）</option>
+                <option value="4|0" selected>[系统⚙️] 插入深度 @D</option>
+                <option value="4|1">[用户👤] 插入深度 @D</option>
+                <option value="4|2">[AI🤖] 插入深度 @D</option>
+                <option value="7|0">➡️ 锚点</option>
+              </select>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 60px;" id="fire-wi-entry-depth-container">
+              <span style="font-size: 11px; opacity: 0.7; color: var(--SmartThemeBodyColor);">深度 (Depth)</span>
+              <input type="number" id="fire-wi-entry-depth" style="
+                height: 32px; padding: 0 10px; font-size: 12px; border-radius: 6px;
+                background: var(--SmartThemeChatTintColor, rgba(0,0,0,0.1)); border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); color: var(--SmartThemeBodyColor, #ffffff); outline: none;
+              " value="4" min="0">
+            </div>
             <div style="display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 60px;">
               <span style="font-size: 11px; opacity: 0.7; color: var(--SmartThemeBodyColor);">顺序 (Order)</span>
               <input type="number" id="fire-wi-entry-order" style="
                 height: 32px; padding: 0 10px; font-size: 12px; border-radius: 6px;
                 background: var(--SmartThemeChatTintColor, rgba(0,0,0,0.1)); border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); color: var(--SmartThemeBodyColor, #ffffff); outline: none;
               " value="100" min="0">
-            </div>
-            <div style="display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 60px;">
-              <span style="font-size: 11px; opacity: 0.7; color: var(--SmartThemeBodyColor);">深度 (Depth)</span>
-              <input type="number" id="fire-wi-entry-depth" style="
-                height: 32px; padding: 0 10px; font-size: 12px; border-radius: 6px;
-                background: var(--SmartThemeChatTintColor, rgba(0,0,0,0.1)); border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); color: var(--SmartThemeBodyColor, #ffffff); outline: none;
-              " value="4" min="0">
             </div>
           </div>
         </div>
@@ -1417,6 +1572,25 @@ function showWIExportModal(doc) {
       commentInput.value = playlistSel.value;
     }
 
+    // Positions select dynamic depth vis logic
+    var posSel = parentDoc.getElementById('fire-wi-entry-position');
+    var depthContainer = parentDoc.getElementById('fire-wi-entry-depth-container');
+    if (posSel && depthContainer) {
+      var updateDepthVis = function() {
+        var parts = posSel.value.split('|');
+        var pos = parseInt(parts[0]);
+        if (pos === 4) { // atDepth
+          depthContainer.style.opacity = '1';
+          depthContainer.style.pointerEvents = 'auto';
+        } else {
+          depthContainer.style.opacity = '0.35';
+          depthContainer.style.pointerEvents = 'none';
+        }
+      };
+      posSel.addEventListener('change', updateDepthVis);
+      updateDepthVis();
+    }
+
     modal.querySelectorAll('input[name="fire-wi-target"]').forEach(function (radio) {
       radio.addEventListener('change', function () {
         var row = parentDoc.getElementById('fire-wi-new-name-row');
@@ -1436,10 +1610,28 @@ function showWIExportModal(doc) {
       var entryOrder   = parseInt(parentDoc.getElementById('fire-wi-entry-order').value) ?? 100;
       var entryDepth   = parseInt(parentDoc.getElementById('fire-wi-entry-depth').value) ?? 4;
 
+      var posVal = parentDoc.getElementById('fire-wi-entry-position').value;
+      var posParts = posVal.split('|');
+      var entryPosition = parseInt(posParts[0]);
+      var entryRole = parseInt(posParts[1]);
+
       confirmBtn.disabled = true;
       confirmBtn.textContent = '写入中...';
       try {
-        await doExportToWorldInfo({ playlist, inclName, inclArtist, inclTags, targetMode, newWiName, currentCharWorld, entryComment, entryOrder, entryDepth });
+        await doExportToWorldInfo({
+          playlist,
+          inclName,
+          inclArtist,
+          inclTags,
+          targetMode,
+          newWiName,
+          currentCharWorld,
+          entryComment,
+          entryOrder,
+          entryDepth,
+          entryPosition,
+          entryRole
+        });
         modal.remove();
       } catch (e) {
         _triggerError('世界书写入失败: ' + e.message);
@@ -1456,27 +1648,37 @@ function showWIExportModal(doc) {
 }
 
 // ─── 世界书写入核心 ───────────────────────────────────────────────────────────
-async function doExportToWorldInfo({ playlist, inclName, inclArtist, inclTags, targetMode, newWiName, currentCharWorld, entryComment, entryOrder, entryDepth }) {
+async function doExportToWorldInfo({ playlist, inclName, inclArtist, inclTags, targetMode, newWiName, currentCharWorld, entryComment, entryOrder, entryDepth, entryPosition, entryRole }) {
   var songs = (_state.playlists || {})[playlist] || [];
   var ss = _state.settings.storySearch || {};
-  var template = ss.tagTemplate || '♪{song} - {artist}♪';
+  var tagTemplate = ss.tagTemplate || '♪{song} - {artist}♪';
 
-  var lines = [
-    `[FIRE Music Reference - ${playlist}]`,
-    '以下是歌单中的歌曲，可在剧情中选用：',
-    '',
-  ];
+  // Construct songs_list
+  var songLines = [];
   songs.forEach(function (song) {
     var parts = [];
     if (inclName   && song.name)                         parts.push(`歌名: ${song.name}`);
     if (inclArtist && song.artist)                       parts.push(`歌手: ${song.artist}`);
     if (inclTags   && song.tags && song.tags.length > 0) parts.push(`标签: ${song.tags.join(', ')}`);
-    if (parts.length > 0) lines.push(parts.join(' | '));
+    if (parts.length > 0) songLines.push(parts.join(' | '));
   });
-  lines.push('');
-  lines.push(`在剧情中需要播放音乐时，请使用格式：${template}`);
+  var songsListStr = songLines.join('\n');
 
-  var content = lines.join('\n');
+  // Resolve play_example
+  var exampleSong = songs.length > 0 ? songs[0] : { name: '歌名', artist: '歌手' };
+  var exampleTag = tagTemplate
+    .replace('{song}', exampleSong.name)
+    .replace('{artist}', exampleSong.artist || '歌手');
+
+  // Resolve template
+  var userTemplate = ss.wiTemplate || '[FIRE Music Reference - {{playlist_name}}]\n以下是歌单中的歌曲，可在剧情中选用：\n\n{{songs_list}}\n\n在剧情中需要播放音乐时，请在发言中包含格式：{{play_tag}}\n例如：{{play_example}}';
+  
+  var content = userTemplate
+    .replace(/\{\{playlist_name\}\}/g, playlist)
+    .replace(/\{\{play_tag\}\}/g, tagTemplate)
+    .replace(/\{\{play_example\}\}/g, exampleTag)
+    .replace(/\{\{songs_list\}\}/g, songsListStr);
+
   var wiName, wiData;
 
   if (targetMode === 'new') {
@@ -1511,14 +1713,18 @@ async function doExportToWorldInfo({ playlist, inclName, inclArtist, inclTags, t
   entry.disable  = false;  // Ensure it is not disabled
   entry.order    = entryOrder;
   entry.depth    = entryDepth;
-  entry.position = 4;      // world_info_position.atDepth is 4
+  entry.position = entryPosition;
   entry.extensions = {
-    position: 4,
+    position: entryPosition,
     depth: entryDepth,
     exclude_recursion: false,
     prevent_recursion: false,
     ignore_budget: false
   };
+  if (entryPosition === 4) {
+    entry.role = entryRole;
+    entry.extensions.role = entryRole;
+  }
   entry.key      = [];
   entry.keysecondary = [];
   entry.addMemo  = true;

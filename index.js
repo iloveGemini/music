@@ -14,6 +14,11 @@ import {
   renderStorySearchSettingsHTML,
   bindStorySearchUIEvents,
 } from './story-search.js';
+import {
+  initListenTogether,
+  showFullScreenListenTogetherEditor,
+  showListenTogetherHelp,
+} from './listen-together.js';
 
 // ─── Playback & App State ──────────────────────────────────────────────────────
 var state = {
@@ -44,6 +49,9 @@ var state = {
     desktopLyricsControlsType: 'buttons',
     desktopLyricsControlsPolicy: 'always',
     desktopLyricsAlign: 'center',
+    listenTogetherEnabled: false,
+    listenTogetherTemplate: '[一起听]\n{{user}}当前正在听：{{song}} - {{artist}}\n标签：{{tags}}\n当前歌词：\n{{lyrics}}\n你可以按照以下格式，和{{user}}分享自己喜欢的歌（不要选择同一首）： {{play_tag}}',
+    listenTogetherLyricsCount: '5',
     searchSources: ['netease', 'joox', 'bilibili'],
     showErrorToasts: false,
     storySearch: {
@@ -1125,6 +1133,43 @@ function createUI() {
       <!-- Section 7: Story Search (injected from story-search.js) -->
       ${renderStorySearchSettingsHTML()}
 
+      <!-- Section 7.5: 一起听设置 -->
+      <div class="fire-settings-section" style="margin-top: 8px; border-top: 1px solid var(--fire-border); padding-top: 8px;">
+        <div class="fire-settings-section-header" id="fire-settings-header-listen">
+          <span style="display: flex; align-items: center; gap: 6px;">
+            一起听设置
+            <i class="fa-regular fa-circle-question fire-listen-help-btn" style="cursor: pointer; opacity: 0.7; font-size: 13px;" title="查看说明书"></i>
+          </span>
+          <i class="fa-solid fa-chevron-right fire-settings-chevron"></i>
+        </div>
+        <div class="fire-settings-section-content" id="fire-settings-content-listen" style="display: none; padding-top: 4px;">
+          <label class="fire-settings-item" style="justify-content: space-between;">
+            <span>启用一起听</span>
+            <input type="checkbox" id="fire-setting-listen-enabled">
+          </label>
+          <div class="fire-settings-sub-item" style="flex-direction: column; align-items: stretch; gap: 4px; margin-top: 4px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span style="font-size: 11px;">提示词内容模板</span>
+              <i class="fa-solid fa-expand fire-listen-template-expand-btn" style="cursor: pointer; opacity: 0.7; font-size: 12px;" title="全屏编辑"></i>
+            </div>
+            <textarea id="fire-setting-listen-template" class="fire-textarea"
+              style="height: 60px; padding: 6px 8px; font-size: 11px; resize: vertical; font-family: monospace; background: rgba(0,0,0,0.25); border: 1px solid var(--fire-border); color: inherit; border-radius: 4px;"
+              placeholder="支持占位符：{{song}}, {{artist}}, {{tags}}, {{lyrics}}, {{play_tag}}, {{play_example}}"></textarea>
+            <span style="font-size: 10px; opacity: 0.5; line-height: 1.2;">可用占位符：{{song}} (歌名), {{artist}} (歌手), {{tags}} (标签), {{lyrics}} (歌词), {{play_tag}} (点歌宏格式), {{play_example}} (播歌指令例句)</span>
+          </div>
+          <div class="fire-settings-sub-item" style="flex-direction: column; align-items: stretch; gap: 4px; margin-top: 4px;">
+            <span style="font-size: 11px;">歌词发送范围</span>
+            <select id="fire-setting-listen-lyricscount" class="fire-select" style="padding: 4px 8px; font-size: 12px; height: 28px;">
+              <option value="0">不发送歌词</option>
+              <option value="3">发送 3 行（当前行 + 前后各 1 行）</option>
+              <option value="5" selected>发送 5 行（当前行 + 前后各 2 行）</option>
+              <option value="7">发送 7 行（当前行 + 前后各 3 行）</option>
+              <option value="all">发送全部歌词</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
     </div>
 
     <div id="fire-panel-body">
@@ -1333,6 +1378,20 @@ function createUI() {
   var inputToggleMethod = doc.getElementById('fire-setting-lyrics-togglemethod');
   if (inputToggleMethod) inputToggleMethod.value = state.settings.desktopLyricsToggleMethod || 'none';
 
+  // 一起听 Settings Loading
+  var chkListenEnabled = doc.getElementById('fire-setting-listen-enabled');
+  if (chkListenEnabled) chkListenEnabled.checked = !!state.settings.listenTogetherEnabled;
+
+  var txtListenTemplate = doc.getElementById('fire-setting-listen-template');
+  if (txtListenTemplate) {
+    txtListenTemplate.value = state.settings.listenTogetherTemplate || '[一起听]\n用户当前正在听：{{song}} - {{artist}}\n标签：{{tags}}\n当前歌词：\n{{lyrics}}';
+  }
+
+  var selListenLyricsCount = doc.getElementById('fire-setting-listen-lyricscount');
+  if (selListenLyricsCount) {
+    selListenLyricsCount.value = state.settings.listenTogetherLyricsCount || '5';
+  }
+
   var inputLongPress = doc.getElementById('fire-setting-lyrics-longpress');
   var valLongPress = doc.getElementById('fire-setting-lyrics-longpress-val');
   var initialLongPress = state.settings.desktopLyricsLongPressTime || 800;
@@ -1420,6 +1479,7 @@ function bindUIEvents() {
     setupCollapsibleSetting('fire-settings-header-sources', 'fire-settings-content-sources');
     setupCollapsibleSetting('fire-settings-header-logs', 'fire-settings-content-logs');
     setupCollapsibleSetting('fire-settings-header-playlistmgr', 'fire-settings-content-playlistmgr');
+    setupCollapsibleSetting('fire-settings-header-listen', 'fire-settings-content-listen');
   }
 
   // Playlist Manager - NetEase Import Event
@@ -1682,6 +1742,47 @@ function bindUIEvents() {
       saveState();
       applyDesktopLyricsSettings();
       showToast("悬浮歌词位置已重置为顶部居中");
+    });
+  }
+
+  // 一起听 Settings Bindings
+  var chkListenEnabled = doc.getElementById('fire-setting-listen-enabled');
+  if (chkListenEnabled) {
+    chkListenEnabled.addEventListener('change', function () {
+      state.settings.listenTogetherEnabled = this.checked;
+      saveState();
+    });
+  }
+
+  var txtListenTemplate = doc.getElementById('fire-setting-listen-template');
+  if (txtListenTemplate) {
+    txtListenTemplate.addEventListener('change', function () {
+      state.settings.listenTogetherTemplate = this.value;
+      saveState();
+    });
+  }
+
+  var selListenLyricsCount = doc.getElementById('fire-setting-listen-lyricscount');
+  if (selListenLyricsCount) {
+    selListenLyricsCount.addEventListener('change', function () {
+      state.settings.listenTogetherLyricsCount = this.value;
+      saveState();
+    });
+  }
+
+  var btnListenHelp = doc.querySelector('.fire-listen-help-btn');
+  if (btnListenHelp) {
+    btnListenHelp.addEventListener('click', function (e) {
+      e.stopPropagation();
+      showListenTogetherHelp();
+    });
+  }
+
+  var btnListenExpand = doc.querySelector('.fire-listen-template-expand-btn');
+  if (btnListenExpand) {
+    btnListenExpand.addEventListener('click', function (e) {
+      e.stopPropagation();
+      showFullScreenListenTogetherEditor();
     });
   }
 
@@ -3343,6 +3444,15 @@ export function init() {
     setCache:     setCache,
     getCache:     getCache,
   });
+  initListenTogether(
+    state,
+    getDoc,
+    saveState,
+    eventSource,
+    event_types,
+    function () { return lyricsList; },
+    function () { return lastActiveLineIdx; }
+  );
   createUI();
 
   panelOpen = false;

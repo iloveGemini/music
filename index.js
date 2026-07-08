@@ -52,6 +52,8 @@ var state = {
     listenTogetherEnabled: false,
     listenTogetherTemplate: '[一起听]\n{{user}}当前正在听：{{song}} - {{artist}}\n标签：{{tags}}\n当前歌词：\n{{lyrics}}\n你可以按照以下格式，和{{user}}分享自己喜欢的歌（不要选择同一首）： {{play_tag}}',
     listenTogetherLyricsCount: '5',
+    listenTogetherRole: 'system',
+    listenTogetherDepth: 1,
     searchSources: ['netease', 'joox', 'bilibili'],
     showErrorToasts: false,
     storySearch: {
@@ -1171,6 +1173,19 @@ function createUI() {
               <option value="all">发送全部歌词</option>
             </select>
           </div>
+          <div class="fire-settings-sub-item" style="flex-direction: column; align-items: stretch; gap: 4px; margin-top: 4px;">
+            <span style="font-size: 11px;">注入角色与层级</span>
+            <div style="display: flex; gap: 6px; align-items: center;">
+              <select id="fire-setting-listen-role" class="fire-select" style="flex: 1; padding: 4px 8px; font-size: 12px; height: 28px; min-width: 0;">
+                <option value="system">系统 system（推荐）</option>
+                <option value="user">用户 user</option>
+                <option value="assistant">助手 assistant</option>
+              </select>
+              <input type="number" id="fire-setting-listen-depth" class="fire-input" min="0" step="1"
+                style="width: 64px; padding: 4px 8px; font-size: 12px; height: 28px; min-width: 0;" title="注入深度：0=最末尾，1=最后一条消息之前">
+            </div>
+            <span style="font-size: 10px; opacity: 0.5; line-height: 1.2;">深度 0 = 插在最末尾（权重最高），1 = 插在最后一条消息之前（推荐，降低复读）。仅对 Chat Completion 生效。</span>
+          </div>
         </div>
       </div>
 
@@ -1394,6 +1409,17 @@ function createUI() {
   var selListenLyricsCount = doc.getElementById('fire-setting-listen-lyricscount');
   if (selListenLyricsCount) {
     selListenLyricsCount.value = state.settings.listenTogetherLyricsCount || '5';
+  }
+
+  var selListenRole = doc.getElementById('fire-setting-listen-role');
+  if (selListenRole) {
+    selListenRole.value = state.settings.listenTogetherRole || 'system';
+  }
+
+  var inputListenDepth = doc.getElementById('fire-setting-listen-depth');
+  if (inputListenDepth) {
+    var depthVal = state.settings.listenTogetherDepth;
+    inputListenDepth.value = (depthVal === undefined || depthVal === null) ? 1 : depthVal;
   }
 
   var inputLongPress = doc.getElementById('fire-setting-lyrics-longpress');
@@ -1770,6 +1796,25 @@ function bindUIEvents() {
   if (selListenLyricsCount) {
     selListenLyricsCount.addEventListener('change', function () {
       state.settings.listenTogetherLyricsCount = this.value;
+      saveState();
+    });
+  }
+
+  var selListenRole = doc.getElementById('fire-setting-listen-role');
+  if (selListenRole) {
+    selListenRole.addEventListener('change', function () {
+      state.settings.listenTogetherRole = this.value;
+      saveState();
+    });
+  }
+
+  var inputListenDepth = doc.getElementById('fire-setting-listen-depth');
+  if (inputListenDepth) {
+    inputListenDepth.addEventListener('change', function () {
+      var d = parseInt(this.value, 10);
+      if (isNaN(d) || d < 0) d = 0;
+      state.settings.listenTogetherDepth = d;
+      this.value = d;
       saveState();
     });
   }
@@ -2510,6 +2555,7 @@ function renderPlaylistSongs() {
         ${song.album ? `<button class="fire-music-item-btn album-btn" title="查看专辑"><i class="fa-solid fa-compact-disc"></i></button>` : ''}
         ${!isVirtual ? `<button class="fire-music-item-btn time-btn" title="编辑起播时间"><i class="fa-regular fa-clock"></i></button>` : ''}
         ${!isVirtual ? `<button class="fire-music-item-btn tag-btn" title="编辑 Tag"><i class="fa-solid fa-tag"></i></button>` : ''}
+        ${isVirtual ? `<button class="fire-music-item-btn add-btn" title="添加到歌单"><i class="fa-solid fa-plus"></i></button>` : ''}
         <button class="fire-music-item-btn remove remove-btn" title="${isVirtual ? '从队列移出' : '从歌单移除'}">
           <i class="fa-solid fa-trash"></i>
         </button>
@@ -2535,6 +2581,16 @@ function renderPlaylistSongs() {
         removeSongFromPlaylist(idx);
       }
     });
+
+    if (isVirtual) {
+      var addBtn = item.querySelector('.add-btn');
+      if (addBtn) {
+        addBtn.addEventListener('click', function (e) {
+          e.stopPropagation();
+          showAddToPlaylistMenu(e, song);
+        });
+      }
+    }
 
     if (!isVirtual) {
       // Tag 按钮

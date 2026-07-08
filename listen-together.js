@@ -34,14 +34,19 @@ function bindPromptHooks() {
     if (!text) return;
 
     var chatArr = eventData.chat;
-    if (Array.isArray(chatArr) && chatArr.length > 0) {
-      // Find the last user message and append
-      for (var i = chatArr.length - 1; i >= 0; i--) {
-        if (chatArr[i].role === 'user') {
-          chatArr[i].content += '\n\n' + text;
-          break;
-        }
-      }
+    if (Array.isArray(chatArr)) {
+      // Inject as a separate message at a configurable role/depth instead of
+      // appending onto the last user turn (which over-weights it and makes the
+      // AI react to the player every turn).
+      var role = state.settings.listenTogetherRole || 'system';
+      var depth = parseInt(state.settings.listenTogetherDepth, 10);
+      if (isNaN(depth) || depth < 0) depth = 1;
+
+      var insertIdx = chatArr.length - depth;
+      if (insertIdx < 0) insertIdx = 0;
+      if (insertIdx > chatArr.length) insertIdx = chatArr.length;
+
+      chatArr.splice(insertIdx, 0, { role: role, content: text });
     }
   });
 
